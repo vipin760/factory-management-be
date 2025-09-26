@@ -1,6 +1,7 @@
 const app = require('./app');
 const dotenv = require('dotenv').config();
 const { createTablesIfNotExist } = require('./database/sql/createTables');
+const { clearAllTables } = require('./utils/clearAllTable');
 
 // Handling uncaughtException
 process.on("uncaughtException", err => {
@@ -20,6 +21,7 @@ const port = process.env.PORT;
 
 // Wrap server startup in async function
 async function startServer() {
+//    await clearAllTables()
     try {
 
         // Ensure all tables exist
