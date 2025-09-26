@@ -1,0 +1,12 @@
+const express = require('express')
+const routes = express()
+const indentController = require('../controllers/indent.controller');
+const { authenticate, authorizeRoles } = require('../middleware/auth');
+
+routes.use(authenticate)
+routes.post("/",authorizeRoles("admin"),indentController.createIndent);
+routes.get("/",authorizeRoles("admin"),indentController.getAllIndent);
+routes.delete("/:id",authorizeRoles("admin"),indentController.deleteIndent);
+routes.put("/:id",authorizeRoles("admin"),indentController.updateIndent);
+
+module.exports = routes
