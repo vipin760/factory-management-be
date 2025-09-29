@@ -23,6 +23,8 @@ const indentRoutes = require("./routes/indent.route")
 const rawMaterialsRoutes = require("./routes/rawMaterials.route");
 const purchaseRoutes = require("./routes/purchase.route");
 const vendorRoutes = require("./routes/vendors.route");
+const grnRoutes = require('./routes/grns.route')
+const userRoutes = require('./routes/user.route')
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -33,6 +35,8 @@ app.use("/api/indent", indentRoutes)
 app.use("/api/raw-material", rawMaterialsRoutes)
 app.use("/api/purchase", purchaseRoutes)
 app.use("/api/vendor", vendorRoutes)
+app.use("/api/grns",grnRoutes);
+app.use("/api/user",userRoutes);
 
 //error middleware
 app.use(errorMiddleare);

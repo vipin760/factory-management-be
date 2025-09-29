@@ -1,5 +1,4 @@
 const { sqlQueryFun } = require("../database/sql/sqlFunction");
-const catchAsync = require("../middleware/catchAsyncErrors");
 const jwt = require('jsonwebtoken')
 const bcrypt = require('bcrypt')
 
