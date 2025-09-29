@@ -4,8 +4,8 @@ const purchaseController = require('../controllers/purchase.controller');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
 
 routes.use(authenticate)
-routes.post('/',authorizeRoles("admin"),purchaseController.createPurchase)
-routes.get('/',authorizeRoles("admin"),purchaseController.fetchPurchase)
+routes.post('/',authorizeRoles("admin","productionsupervisor"),purchaseController.createPurchase)
+routes.get('/',authorizeRoles("admin","productionsupervisor"),purchaseController.fetchPurchase)
 routes.delete('/:id',authorizeRoles("admin"),purchaseController.deletePurchase)
 routes.put('/:id',authorizeRoles("admin"),purchaseController.updatePurchase)
 

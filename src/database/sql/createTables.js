@@ -101,6 +101,14 @@ async function createTablesIfNotExist() {
         created_at TIMESTAMP DEFAULT now()
       );
       
+       CREATE TABLE IF NOT EXISTS grns (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        grn_no TEXT UNIQUE NOT NULL,
+        purchase_order_id UUID REFERENCES purchase_orders(id) NOT NULL,
+        received_by UUID REFERENCES users(id) NOT NULL,
+        received_at TIMESTAMP DEFAULT now(),
+        notes TEXT
+      );
 
       -- Add remaining tables here following same pattern...
     `);
