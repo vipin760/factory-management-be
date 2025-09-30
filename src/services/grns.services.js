@@ -2,13 +2,13 @@ const { sqlQueryFun } = require("../database/sql/sqlFunction")
 
 exports.createGrnService = async(body,userId)=>{
     try {
-        const { grn_no,purchase_order_id,notes } = body
+        const { grn_no,purchase_order_id,gate_pass_number,notes } = body
         const [ existGrn ] = await sqlQueryFun(`SELECT * FROM grns WHERE grn_no=$1`,[grn_no])
         if(existGrn) return { status:false,message:`The GRN(${grn_no}) number you entered already exists in our records. Please use a different GRN number`}
         
-        const insertGrnQry = `INSERT INTO grns (grn_no, purchase_order_id, received_by,notes) VALUES ( $1, $2, $3, $4)
+        const insertGrnQry = `INSERT INTO grns (grn_no, purchase_order_id, received_by,gate_pass_number,notes) VALUES ( $1, $2, $3, $4,$5)
     RETURNING *`
-    const insertGrnVal = [grn_no,purchase_order_id,userId,notes]
+    const insertGrnVal = [grn_no,purchase_order_id,userId,gate_pass_number,notes]
 
     const result = await sqlQueryFun(insertGrnQry,insertGrnVal)
     return { status:true,data:result[0],message:"GRN has been created successfully"}
@@ -100,6 +100,7 @@ exports.getAllGrnService = async (query) => {
         g.grn_no,
         g.received_at,
         g.notes,
+        g.gate_pass_number,
         g.received_by,
         po.id AS purchase_order_id,
         po.po_no,
@@ -147,30 +148,80 @@ exports.getAllGrnService = async (query) => {
   }
 };
 
-exports.updateGrnService = async (id, body) => {
+exports.updateGrnService1 = async (id, body) => {
   try {
-    const { grn_no, purchase_order_id, notes } = body;
+    const fields = [];
+    const values = [];
+    let index = 1;
+
+    for (const [key, value] of Object.entries(body)) {
+      if (value !== undefined) {
+        fields.push(`${key}=$${index}`);
+        values.push(value);
+        index++;
+      }
+    }
+
+    if (fields.length === 0) {
+      return { status: false, message: "No fields provided to update." };
+    }
+    values.push(id);
 
     const updateQuery = `
       UPDATE grns
-      SET grn_no=$1, purchase_order_id=$2, notes=$3
-      WHERE id=$4
+      SET ${fields.join(", ")}
+      WHERE id=$${index}
       RETURNING *
     `;
-    const result = await sqlQueryFun(updateQuery, [grn_no, purchase_order_id, notes, id]);
 
-    if (!result.length) {
+    const result = await sqlQueryFun(updateQuery, values);
+    if (!result.length) { return { status: false, message: "GRN not found." } }
+    
+    return { status: true,data: result[0],message: "GRN updated successfully."};
+  } catch (error) {
+    return { status: false,message: `Something went wrong. (${error.message})`,};
+  }
+};
+
+exports.updateGrnService = async (id, body) => {
+  try {
+    // Get GRN first
+    const grnRes = await sqlQueryFun(`SELECT * FROM grns WHERE id = $1`, [id]);
+    console.log("<><>grnRes",grnRes)
+
+    if (!grnRes.length) {
       return { status: false, message: "GRN not found." };
     }
 
-    return { status: true, data: result[0], message: "GRN updated successfully." };
+    const updatedGrn = grnRes[0];
+
+    // --- If frontend passed "status", update purchase_order ---
+    if (body.status && updatedGrn.purchase_order_id) {
+      await sqlQueryFun(
+        `UPDATE purchase_orders 
+         SET status = $1 
+         WHERE id = $2`,
+        [body.status, updatedGrn.purchase_order_id]
+      );
+    }
+
+    return {
+      status: true,
+      data: updatedGrn,
+      message:
+        "GRN fetched successfully" +
+        (body.status ? " and Purchase Order status updated." : "")
+    };
   } catch (error) {
     return {
       status: false,
-      message: `Something went wrong. (${error.message})`,
+      message: `Something went wrong. (${error.message})`
     };
   }
 };
+
+
+
 
 exports.deleteGrnService = async (id) => {
   try {
