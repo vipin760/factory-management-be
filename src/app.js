@@ -26,6 +26,8 @@ const vendorRoutes = require("./routes/vendors.route");
 const grnRoutes = require('./routes/grns.route')
 const userRoutes = require('./routes/user.route')
 const productionRoutes = require('./routes/production.route')
+const reportsRoutes = require('./routes/reports.route')
+const expenditureRoutes = require('./routes/expenditure.route')
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -39,6 +41,8 @@ app.use("/api/vendor", vendorRoutes)
 app.use("/api/grns",grnRoutes);
 app.use("/api/user",userRoutes);
 app.use("/api/production",productionRoutes)
+app.use("/api/report",reportsRoutes)
+app.use("/api/expenditure",expenditureRoutes)
 
 //error middleware
 app.use(errorMiddleare);

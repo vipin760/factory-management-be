@@ -9,4 +9,7 @@ routes.get("/",authorizeRoles("admin","productionsupervisor"),rawMaterialsContro
 routes.delete("/:id",authorizeRoles("admin","productionsupervisor"),rawMaterialsController.deleteRawMaterial);
 routes.put("/:id",authorizeRoles("admin"),rawMaterialsController.updateRawMaterial);
 
+// Raw material batches route
+routes.post("/raw-material-batch",authorizeRoles("admin","productionsupervisor"),rawMaterialsController.createRawMaterialBatches);
+routes.get("/raw-material-batch",authorizeRoles("admin","productionsupervisor"),rawMaterialsController.fetchRawMaterialBatches);
 module.exports = routes

@@ -3,7 +3,7 @@ const { pool } = require('../../config/database');
 async function createTablesIfNotExist() {
   console.log("<><>start checking tables")
   try {
-    await pool.query(`
+   await pool.query(`
   CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
   -- Users table
@@ -12,7 +12,7 @@ async function createTablesIfNotExist() {
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    role TEXT NOT NULL, -- administrator, procurement, production_manager, inventory_clerk, finance
+    role TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT now()
   );
 
@@ -59,9 +59,9 @@ async function createTablesIfNotExist() {
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     indent_no TEXT UNIQUE NOT NULL,
     requested_by UUID REFERENCES users(id) NOT NULL,
-    status TEXT DEFAULT 'draft' NOT NULL, -- draft, submitted, approved, rejected, closed
+    status TEXT DEFAULT 'draft' NOT NULL,
     required_by DATE,
-    priority TEXT DEFAULT 'medium' NOT NULL, -- low, medium, high
+    priority TEXT DEFAULT 'medium' NOT NULL,
     notes TEXT,
     created_at TIMESTAMP DEFAULT now()
   );
@@ -81,8 +81,9 @@ async function createTablesIfNotExist() {
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     po_no TEXT UNIQUE NOT NULL,
     vendor_id UUID REFERENCES vendors(id) NOT NULL,
+    indent_id UUID REFERENCES indents(id),
     created_by UUID REFERENCES users(id) NOT NULL,
-    status TEXT DEFAULT 'draft' NOT NULL, -- draft, submitted, approved, partially_received, closed
+    status TEXT DEFAULT 'draft' NOT NULL,
     total_value NUMERIC DEFAULT 0,
     expected_delivery DATE,
     created_at TIMESTAMP DEFAULT now()
@@ -127,7 +128,7 @@ async function createTablesIfNotExist() {
     article_sku TEXT,
     planned_qty NUMERIC,
     produced_qty NUMERIC DEFAULT 0,
-    status TEXT DEFAULT 'planned' NOT NULL, -- planned, in_process, qc, released
+    status TEXT DEFAULT 'planned' NOT NULL,
     start_date TIMESTAMP,
     end_date TIMESTAMP,
     created_at TIMESTAMP DEFAULT now()
@@ -152,9 +153,20 @@ async function createTablesIfNotExist() {
     timestamp TIMESTAMP DEFAULT now(),
     details JSONB
   );
+
+  -- Operation expenses table linked to production batches
+ CREATE TABLE IF NOT EXISTS operation_expenses (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    production_batch_id UUID REFERENCES production_batches(id) ON DELETE CASCADE,
+    expense_type TEXT NOT NULL,         
+    amount NUMERIC NOT NULL,             
+    expense_date DATE,
+    labour_type TEXT,                  
+    labour_count INT,                  
+    category TEXT,                      
+    remarks TEXT
+);
 `);
-
-
 
     console.log('✅ Tables checked/created successfully.');
   } catch (err) {

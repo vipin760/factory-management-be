@@ -128,3 +128,193 @@ exports.updateRawMaterialService = async (id, data) => {
     return { status: false, message: error.message };
   }
 };
+
+// Raw material batches services
+exports.createRawMaterialBatchesService = async(body)=>{
+   const { raw_material_id, batch_no, qty_received = 0,qty_available = 0,cost_per_unit = 0,mfg_date,exp_date,location} = body;
+   try {
+      //  const rawMaterialsBatchesExistQry = `SELECT * FROM raw_materials WHERE code = $1`
+      //   const rawMaterialsBatchesExistVal = [code]
+      //   const checkRawMaterialBatchesExist = await sqlQueryFun(rawMaterialsBatchesExistQry,rawMaterialsBatchesExistVal);
+      //   if(checkRawMaterialBatchesExist.length != 0){
+      //     return {status:false,message:`raw material batch_no:(${batch_no}) already exist`}
+      //   }
+
+      const insertQuery = `INSERT INTO raw_material_batches (raw_material_id, batch_no, qty_received, qty_available, cost_per_unit, mfg_date, exp_date, location) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`;
+  const values = [raw_material_id,batch_no,qty_received,qty_available,cost_per_unit,mfg_date || null,exp_date || null,location || null];
+    const rows = await sqlQueryFun(insertQuery,values)
+    return { status: true, data: rows[0], message: "Raw material batch created successfully" };
+  } catch (error) {
+    return { status:false, message:`Something went wrong (${error.message})`}
+  }
+}
+
+exports.getAllRawMaterialBatchesService1 = async (queryParams) => {
+  try {
+    let { 
+      search,               // keyword search (batch_no, location, raw_material_name)
+      raw_material_name,    // filter specifically by raw material name
+      start_date,           // filter by mfg_date >=
+      end_date,             // filter by exp_date <=
+      sort_by = "created_at", 
+      sort_order = "DESC", 
+      limit, 
+      offset = 0 
+    } = queryParams;
+
+    let baseQuery = `
+      SELECT rb.*, rm.name AS raw_material_name, rm.code AS raw_material_code, rm.uom, rm.category
+      FROM raw_material_batches rb
+      JOIN raw_materials rm ON rb.raw_material_id = rm.id
+      WHERE 1=1
+    `;
+
+    let values = [];
+    let conditions = [];
+
+    // 🔍 General Search (batch_no, location, raw_material_name)
+    if (search) {
+      values.push(`%${search}%`);
+      conditions.push(`(rb.batch_no ILIKE $${values.length} OR rb.location ILIKE $${values.length} OR rm.name ILIKE $${values.length})`);
+    }
+
+    // 🎯 Filter by raw material name
+    if (raw_material_name) {
+      values.push(`%${raw_material_name}%`);
+      conditions.push(`rm.name ILIKE $${values.length}`);
+    }
+
+    // 📅 Filter by manufacturing date (>= start_date)
+    if (start_date) {
+      values.push(start_date);
+      conditions.push(`rb.mfg_date >= $${values.length}`);
+    }
+
+    // 📅 Filter by expiry date (<= end_date)
+    if (end_date) {
+      values.push(end_date);
+      conditions.push(`rb.exp_date <= $${values.length}`);
+    }
+
+    // Apply conditions
+    if (conditions.length > 0) {
+      baseQuery += " AND " + conditions.join(" AND ");
+    }
+
+    // Sorting
+    const validSortColumns = ["created_at", "batch_no", "qty_available", "mfg_date", "exp_date", "cost_per_unit"];
+    if (!validSortColumns.includes(sort_by)) sort_by = "created_at"; // fallback
+    sort_order = sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC";
+    baseQuery += ` ORDER BY rb.${sort_by} ${sort_order}`;
+
+    // Pagination
+    if (limit) {
+      values.push(limit);
+      values.push(offset);
+      baseQuery += ` LIMIT $${values.length - 1} OFFSET $${values.length}`;
+    }
+
+    const rows = await sqlQueryFun(baseQuery, values);
+if(rows.length == 0){
+  return { status: true, data: [], message: "Raw material batches not found" };
+}
+ 
+return { status: true, data: rows, message: "Raw material batches fetched successfully" };
+
+  } catch (error) {
+    return { status: false, message: `Something went wrong (${error.message})` };
+  }
+};
+
+exports.getAllRawMaterialBatchesService = async (queryParams) => {
+  try {
+    let { 
+      search, 
+      raw_material_name, 
+      start_date, 
+      end_date, 
+      sort_by = "created_at", 
+      sort_order = "DESC", 
+      limit, 
+      page = 1 
+    } = queryParams;
+
+    let baseQuery = `
+      FROM raw_material_batches rb
+      JOIN raw_materials rm ON rb.raw_material_id = rm.id
+      WHERE 1=1
+    `;
+
+    let values = [];
+    let conditions = [];
+
+    // General search
+    if (search) {
+      values.push(`%${search}%`);
+      conditions.push(`(rb.batch_no ILIKE $${values.length} OR rb.location ILIKE $${values.length} OR rm.name ILIKE $${values.length})`);
+    }
+
+    if (raw_material_name) {
+      values.push(`%${raw_material_name}%`);
+      conditions.push(`rm.name ILIKE $${values.length}`);
+    }
+
+    if (start_date) {
+      values.push(start_date);
+      conditions.push(`rb.mfg_date >= $${values.length}`);
+    }
+
+    if (end_date) {
+      values.push(end_date);
+      conditions.push(`rb.exp_date <= $${values.length}`);
+    }
+
+    if (conditions.length > 0) {
+      baseQuery += " AND " + conditions.join(" AND ");
+    }
+
+    // 1️⃣ Get total count
+    const countQuery = `SELECT COUNT(*) ${baseQuery}`;
+    const countResult = await sqlQueryFun(countQuery, values);
+    const total = parseInt(countResult[0].count, 10);
+
+    // 2️⃣ Apply sorting
+    const validSortColumns = ["created_at", "batch_no", "qty_available", "mfg_date", "exp_date", "cost_per_unit"];
+    if (!validSortColumns.includes(sort_by)) sort_by = "created_at";
+    sort_order = sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC";
+
+    // 3️⃣ Apply pagination
+    let paginatedQuery = `SELECT rb.*, rm.name AS raw_material_name, rm.code AS raw_material_code, rm.uom, rm.category ${baseQuery} ORDER BY rb.${sort_by} ${sort_order}`;
+    if (limit && limit !== "all") {
+      const limitNum = parseInt(limit, 10);
+      const offsetNum = (parseInt(page, 10) - 1) * limitNum;
+      values.push(limitNum, offsetNum);
+      paginatedQuery += ` LIMIT $${values.length - 1} OFFSET $${values.length}`;
+    }
+
+    const response = await sqlQueryFun(paginatedQuery, values);
+
+    // 4️⃣ Calculate total pages
+    const totalPages = limit && limit !== "all" ? Math.ceil(total / parseInt(limit, 10)) : 1;
+
+    const result = {
+      response,
+      total,
+      page: limit && limit !== "all" ? parseInt(page, 10) : 1,
+      limit: limit && limit !== "all" ? parseInt(limit, 10) : total,
+      totalPages
+    };
+
+    return {
+      status: true,
+      data: result,
+      message: "Raw materials fetched successfully"
+    };
+
+  } catch (error) {
+    return { status: false, message: `Something went wrong (${error.message})` };
+  }
+};
+
+
+

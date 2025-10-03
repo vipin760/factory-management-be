@@ -1,44 +1,55 @@
 const { sqlQueryFun } = require("../database/sql/sqlFunction")
 
 exports.createIndentService = async (body, userId) => {
-    try {
-        const { indent_no, status, required_by, priority, notes, items } = body
-        if (!indent_no) return { status: false, data: [], message: "indent_no field required" }
-        if (!userId) return { status: false, data: [], message: "requested_by field required" }
-        const indentExistQry = 'SELECT * FROM indents WHERE indent_no=$1'
-        const indentExistVal = [indent_no]
+  try {
+    const userExistQuery = `SELECT id FROM users WHERE id = $1`;
+    const userExistVal = [userId];
+    const userExist = await sqlQueryFun(userExistQuery, userExistVal);
 
-        const indentExist = await sqlQueryFun(indentExistQry, indentExistVal);
-        if (indentExist.length) return { status: false, data: indentExist, message: "An indent with this number already exists" }
+    if (!userExist.length) {
+      return {
+        status: false,
+        data: [],
+        message: `User with id ${userId} does not exist in users table.`
+      };
+    }
+    const { indent_no, status, required_by, priority, notes, items } = body
+    if (!indent_no) return { status: false, data: [], message: "indent_no field required" }
+    if (!userId) return { status: false, data: [], message: "requested_by field required" }
+    const indentExistQry = 'SELECT * FROM indents WHERE indent_no=$1'
+    const indentExistVal = [indent_no]
 
-        const insertIndentQry = `INSERT INTO indents (indent_no, requested_by, status, required_by, priority, notes)
+    const indentExist = await sqlQueryFun(indentExistQry, indentExistVal);
+    if (indentExist.length) return { status: false, data: indentExist, message: "An indent with this number already exists" }
+
+    const insertIndentQry = `INSERT INTO indents (indent_no, requested_by, status, required_by, priority, notes)
     VALUES ( $1, $2, $3, $4, $5, $6)
     RETURNING *`
-        const insertIndentVal = [indent_no, userId, status, required_by, priority, notes]
+    const insertIndentVal = [indent_no, userId, status, required_by, priority, notes]
 
-        const [newIndent] = await sqlQueryFun(insertIndentQry, insertIndentVal)
+    const [newIndent] = await sqlQueryFun(insertIndentQry, insertIndentVal)
 
-        if (items && Array.isArray(items) && items.length > 0) {
-            for (const item of items) {
-                const { raw_material_id, qty, uom, notes: itemNotes } = item;
+    if (items && Array.isArray(items) && items.length > 0) {
+      for (const item of items) {
+        const { raw_material_id, qty, uom, notes: itemNotes } = item;
 
-                if (!qty || !uom) {
-                    return { status: false, data: [], message: "Each item must have raw_material_id, qty, and uom" };
-                }
-
-                const insertItemQry = `
-          INSERT INTO indent_items (indent_id, raw_material_id, qty, uom, notes)
-          VALUES ($1, $2, $3, $4, $5)`;
-                const insertItemVal = [newIndent.id, raw_material_id, qty, uom, itemNotes || null];
-
-                await sqlQueryFun(insertItemQry, insertItemVal);
-            }
+        if (!qty || !uom) {
+          return { status: false, data: [], message: "Each item must have raw_material_id, qty, and uom" };
         }
 
-        return { status: true, data: newIndent, message: "Indent has been created successfully" }
-    } catch (error) {
-        return { status: false, data: [], message: error.message }
+        const insertItemQry = `
+          INSERT INTO indent_items (indent_id, raw_material_id, qty, uom, notes)
+          VALUES ($1, $2, $3, $4, $5)`;
+        const insertItemVal = [newIndent.id, raw_material_id, qty, uom, itemNotes || null];
+
+        await sqlQueryFun(insertItemQry, insertItemVal);
+      }
     }
+
+    return { status: true, data: newIndent, message: "Indent has been created successfully" }
+  } catch (error) {
+    return { status: false, data: [], message: error.message }
+  }
 
 }
 
@@ -112,61 +123,61 @@ exports.getAllIndentService = async (queryParams) => {
 };
 
 exports.deleteIndentService = async (id) => {
-    try {
-        if (!id) return { status: false, data: [], message: "Indent ID is required" };
+  try {
+    if (!id) return { status: false, data: [], message: "Indent ID is required" };
 
-        const checkQuery = `SELECT * FROM indents WHERE id = $1`;
-        const existing = await sqlQueryFun(checkQuery, [id]);
-        if (!existing.length) return { status: false, data: [], message: "Indent not found" };
+    const checkQuery = `SELECT * FROM indents WHERE id = $1`;
+    const existing = await sqlQueryFun(checkQuery, [id]);
+    if (!existing.length) return { status: false, data: [], message: "Indent not found" };
 
-        const deleteQuery = `DELETE FROM indents WHERE id = $1`;
-        await sqlQueryFun(deleteQuery, [id])
+    const deleteQuery = `DELETE FROM indents WHERE id = $1`;
+    await sqlQueryFun(deleteQuery, [id])
 
-        return { status: true, data: [], message: `Indent "${existing[0].indent_no}" has been deleted successfully` };
-    } catch (error) {
-        return { status: false, data: [], message: error.message }
-    }
+    return { status: true, data: [], message: `Indent "${existing[0].indent_no}" has been deleted successfully` };
+  } catch (error) {
+    return { status: false, data: [], message: error.message }
+  }
 }
 
 exports.updateIndentService1 = async (body, id) => {
-    try {
-        if (!id) return { status: false, data: [], message: "Indent ID is required" }
+  try {
+    if (!id) return { status: false, data: [], message: "Indent ID is required" }
 
-        const checkQuery = `SELECT * FROM indents WHERE id = $1`;
-        const existing = await sqlQueryFun(checkQuery, [id]);
-        if (!existing.length) return { status: false, data: [], message: "Indent not found" };
+    const checkQuery = `SELECT * FROM indents WHERE id = $1`;
+    const existing = await sqlQueryFun(checkQuery, [id]);
+    if (!existing.length) return { status: false, data: [], message: "Indent not found" };
 
-        const { indent_no, requested_by, status, required_by, priority, notes, items } = body;
+    const { indent_no, requested_by, status, required_by, priority, notes, items } = body;
 
-        if (requested_by) {
-            const userCheck = await sqlQueryFun(`SELECT * FROM users WHERE id = $1`, [requested_by]);
-            if (!userCheck.length) return { status: false, data: [], message: "Requested user not found" };
-        }
-
-        const fields = [];
-        const values = [];
-        let idx = 1;
-
-        if (indent_no) { fields.push(`indent_no = $${idx++}`); values.push(indent_no); }
-        if (requested_by) { fields.push(`requested_by = $${idx++}`); values.push(requested_by); }
-        if (status) { fields.push(`status = $${idx++}`); values.push(status); }
-        if (required_by) { fields.push(`required_by = $${idx++}`); values.push(required_by); }
-        if (priority) { fields.push(`priority = $${idx++}`); values.push(priority); }
-        if (notes) { fields.push(`notes = $${idx++}`); values.push(notes); }
-
-        if (fields.length === 0) return { status: false, data: [], message: "No fields to update" };
-
-        values.push(id);
-
-        const updateQuery = `UPDATE indents SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`;
-
-        const result = await sqlQueryFun(updateQuery, values);
-
-        return { status: true, data: result, message: "Indent updated successfully" };
-
-    } catch (error) {
-        return { status: false, data: [], message: error.message }
+    if (requested_by) {
+      const userCheck = await sqlQueryFun(`SELECT * FROM users WHERE id = $1`, [requested_by]);
+      if (!userCheck.length) return { status: false, data: [], message: "Requested user not found" };
     }
+
+    const fields = [];
+    const values = [];
+    let idx = 1;
+
+    if (indent_no) { fields.push(`indent_no = $${idx++}`); values.push(indent_no); }
+    if (requested_by) { fields.push(`requested_by = $${idx++}`); values.push(requested_by); }
+    if (status) { fields.push(`status = $${idx++}`); values.push(status); }
+    if (required_by) { fields.push(`required_by = $${idx++}`); values.push(required_by); }
+    if (priority) { fields.push(`priority = $${idx++}`); values.push(priority); }
+    if (notes) { fields.push(`notes = $${idx++}`); values.push(notes); }
+
+    if (fields.length === 0) return { status: false, data: [], message: "No fields to update" };
+
+    values.push(id);
+
+    const updateQuery = `UPDATE indents SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`;
+
+    const result = await sqlQueryFun(updateQuery, values);
+
+    return { status: true, data: result, message: "Indent updated successfully" };
+
+  } catch (error) {
+    return { status: false, data: [], message: error.message }
+  }
 }
 
 exports.updateIndentService = async (body, id) => {
@@ -257,6 +268,67 @@ exports.updateIndentService = async (body, id) => {
 
   } catch (error) {
     return { status: false, data: [], message: error.message };
+  }
+};
+
+exports.getIndentByIdService = async (id) => {
+  try {
+    const query = `
+      SELECT 
+        i.*,
+        u.name AS requested_by_name,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', ii.id,
+              'indent_id', ii.indent_id,
+              'raw_material_id', ii.raw_material_id,
+              'qty', ii.qty,
+              'uom', ii.uom,
+              'notes', ii.notes,
+              'raw_material', json_build_object(
+                'id', rm.id,
+                'code', rm.code,
+                'name', rm.name,
+                'description', rm.description,
+                'uom', rm.uom,
+                'category', rm.category,
+                'batchable', rm.batchable,
+                'reorder_level', rm.reorder_level
+              )
+            )
+          ) FILTER (WHERE ii.id IS NOT NULL),
+          '[]'
+        ) AS items
+      FROM indents i
+      LEFT JOIN users u ON u.id = i.requested_by
+      LEFT JOIN indent_items ii ON ii.indent_id = i.id
+      LEFT JOIN raw_materials rm ON rm.id = ii.raw_material_id
+      WHERE i.id = $1
+      GROUP BY i.id, u.name;
+    `;
+
+    const result = await sqlQueryFun(query, [id]);
+
+    if (result.length === 0) {
+      return {
+        status: false,
+        data: null,
+        message: 'Indent not found',
+      };
+    }
+
+    return {
+      status: true,
+      data: result[0],
+      message: 'Indent fetched successfully',
+    };
+  } catch (error) {
+    return {
+      status: false,
+      data: null,
+      message: error.message || 'Something went wrong while fetching indent',
+    };
   }
 };
 
