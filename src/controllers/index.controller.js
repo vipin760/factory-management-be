@@ -1,6 +1,6 @@
 const { sqlQueryFun } = require("../database/sql/sqlFunction");
 const catchAsync = require("../middleware/catchAsyncErrors");
-const { clearAllTables } = require("../utils/clearAllTable");
+const { clearAllTables, dropAllTables } = require("../utils/clearAllTable");
 const bcrypt = require('bcrypt')
 
 exports.index = (req, res) => {
@@ -38,12 +38,17 @@ exports.createDefaultUser = catchAsync( async(req ,res,next)=>{
 exports.clearSqlDataBase=async(req,res)=>{
   try {
     const { id } = req.params
+    console.log("<><>id" ,id === "Admin2025")
   if(id === "Admin2025"){
-    const data = await clearAllTables()
-    return res.send(data);
+    const {status,message} = await clearAllTables()
+    return res.status(200).send({status,message});
   }
+  if(id === "Table2025"){
+    const {status,message} = await dropAllTables()
+    return res.status(200).send({status,message});
+  }
+   return res.status(200).send({status:true,message:"database not delete check params"});
   } catch (error) {
-    console.log("<><>error",error)
     return res.status(500).send({status:false,message:`1internal server down (${error.message})`})
   }
 }

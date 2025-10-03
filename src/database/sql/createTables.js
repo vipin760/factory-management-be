@@ -80,6 +80,7 @@ async function createTablesIfNotExist() {
   CREATE TABLE IF NOT EXISTS purchase_orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     po_no TEXT UNIQUE NOT NULL,
+    batch_no TEXT NOT NULL,
     vendor_id UUID REFERENCES vendors(id) NOT NULL,
     indent_id UUID REFERENCES indents(id),
     created_by UUID REFERENCES users(id) NOT NULL,
@@ -156,16 +157,28 @@ async function createTablesIfNotExist() {
 
   -- Operation expenses table linked to production batches
  CREATE TABLE IF NOT EXISTS operation_expenses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  production_batch_id UUID REFERENCES production_batches(id) ON DELETE CASCADE,
+  expense_type TEXT NOT NULL,         
+  amount NUMERIC NOT NULL,             
+  expense_date DATE,
+  labour_type TEXT,                  
+  labour_count INT,                  
+  category TEXT,                      
+  remarks TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS raw_material_movements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    production_batch_id UUID REFERENCES production_batches(id) ON DELETE CASCADE,
-    expense_type TEXT NOT NULL,         
-    amount NUMERIC NOT NULL,             
-    expense_date DATE,
-    labour_type TEXT,                  
-    labour_count INT,                  
-    category TEXT,                      
-    remarks TEXT
-);
+    raw_material_batch_id UUID REFERENCES raw_material_batches(id) ON DELETE CASCADE NOT NULL,
+    movement_type TEXT CHECK (movement_type IN ('in','out')) NOT NULL,
+    qty NUMERIC NOT NULL,
+    cost_per_unit NUMERIC NOT NULL,
+    reference_type TEXT NOT NULL,   
+    reference_id UUID,             
+    created_at TIMESTAMP DEFAULT now()
+  );
+
 `);
 
     console.log('✅ Tables checked/created successfully.');
