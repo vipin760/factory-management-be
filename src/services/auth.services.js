@@ -21,7 +21,7 @@ exports.registerUserService = async (body) => {
     const password_hash = await bcrypt.hash(password,10)
     const createUserval = [name, email,password_hash , role];
     const result = await sqlQueryFun(createUserQry, createUserval);
-    return {staus:true,data:result[0], message:"User registration completed successfully"}
+    return {status:true,data:result[0], message:"User registration completed successfully"}
 }
 
 exports.loginUserService = async(body)=>{

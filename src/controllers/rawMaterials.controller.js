@@ -27,3 +27,17 @@ exports.updateRawMaterial = catchAsync( async(req ,res ,next)=>{
     if(!status) return next(new ErrorHandler(message,400));
     return res.status(200).send({status,data,message})
 })
+
+// Raw material batches controller
+exports.createRawMaterialBatches = catchAsync( async(req ,res ,next)=>{
+    const {status, data, message} = await rawMaterialServices.createRawMaterialBatchesService(req.body)
+    if(!status) return next(new ErrorHandler(message,400));
+    return res.status(200).send({status,data,message})
+})
+
+exports.fetchRawMaterialBatches = catchAsync( async(req ,res ,next)=>{
+    const {status, data, message} = await rawMaterialServices.getAllRawMaterialBatchesService(req.query)
+    if(!status) return next(new ErrorHandler(message,400));
+    const { response, total, page, limit } = data
+    return res.status(200).send({status,data:response,total,limit,page,message})
+})

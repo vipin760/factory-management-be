@@ -14,6 +14,12 @@ exports.getAllIndent = catchAsync( async(req ,res ,next)=>{
     return res.status(200).send({status,data,message})
 })
 
+exports.getByIndentId = catchAsync( async(req ,res ,next)=>{
+    const {status, data, message} = await indentServices.getIndentByIdService(req.params.id);
+    if(!status) return next(new ErrorHandler(message,400));
+    return res.status(200).send({status,data,message})
+})
+
 exports.deleteIndent = catchAsync( async(req ,res ,next)=>{
     const {status, data, message} = await indentServices.deleteIndentService(req.params.id);
     if(!status) return next(new ErrorHandler(message,400));

@@ -2,7 +2,7 @@ const { sqlQueryFun } = require("../database/sql/sqlFunction");
 
 exports.createNewPurchaseOrderService = async (body, userId) => {
     try {
-        const { po_no, vendor_id, expected_delivery, items } = body;
+        const { po_no, vendor_id,indent_id, expected_delivery, items } = body;
         if (!po_no || !vendor_id || !Array.isArray(items) || items.length === 0)
             return { status: false, message: "PO number, vendor, created_by, and at least one item are required." };
 
@@ -17,8 +17,8 @@ exports.createNewPurchaseOrderService = async (body, userId) => {
             }
         }
 
-        const insertPOQuery = `INSERT INTO purchase_orders (po_no, vendor_id, created_by, expected_delivery, status, total_value) VALUES ($1, $2, $3, $4, 'draft', 0) RETURNING *`;
-        const [po] = await sqlQueryFun(insertPOQuery, [po_no, vendor_id, userId, expected_delivery || null]);
+        const insertPOQuery = `INSERT INTO purchase_orders (po_no, vendor_id,indent_id, created_by, expected_delivery, status, total_value) VALUES ($1, $2, $3, $4, $5, 'draft', 0) RETURNING *`;
+        const [po] = await sqlQueryFun(insertPOQuery, [po_no, vendor_id,indent_id || null, userId, expected_delivery || null]);
 
         let totalValue = 0;
         for (const itm of items) {
@@ -31,12 +31,13 @@ exports.createNewPurchaseOrderService = async (body, userId) => {
 
         return { status: true, message: "Purchase order created successfully.", data: { ...po, total_value: totalValue, items } };
     } catch (error) {
+      console.log("<><>error",error)
         return {
             status: false,
             message: `Something went wrong on our end. Please try again later. (${error.message})`
         };
     }
-};
+};  
 
 exports.getAllPurchaseOrderService = async (queryParams) => {
     try {
@@ -49,6 +50,7 @@ exports.getAllPurchaseOrderService = async (queryParams) => {
 
         let baseQuery = `
       SELECT po.*, v.name AS vendor_name,
+      i.indent_no AS indent_no,
              json_agg(
                json_build_object(
                  'id', poi.id,
@@ -61,6 +63,7 @@ exports.getAllPurchaseOrderService = async (queryParams) => {
              ) AS items
       FROM purchase_orders po
       JOIN vendors v ON po.vendor_id = v.id
+      LEFT JOIN indents i ON po.indent_id = i.id
       LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
       WHERE 1=1
     `;
@@ -99,7 +102,7 @@ exports.getAllPurchaseOrderService = async (queryParams) => {
             idx++;
         }
 
-        baseQuery += ` GROUP BY po.id, v.name`;
+        baseQuery += ` GROUP BY po.id, v.name, i.indent_no`;
         baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
 
         if (limit) {
@@ -181,7 +184,7 @@ exports.deletePurchaseOrderService = async (id) => {
 
 exports.updatePurchaseOrderService = async (id, body) => {
   try {
-    const { po_no, vendor_id, expected_delivery, status, items } = body;
+    const { po_no, vendor_id, expected_delivery,indent_id, status, items } = body;
     if (!id) return { status: false, message: "Purchase Order ID is required." };
 
     const [existing] = await sqlQueryFun(
@@ -212,6 +215,10 @@ exports.updatePurchaseOrderService = async (id, body) => {
     if (status) {
       updateFields.push(`status = $${idx++}`);
       values.push(status);
+    }
+    if (indent_id) {
+      updateFields.push(`indent_id = $${idx++}`);
+      values.push(indent_id);
     }
 
     if (updateFields.length) {

@@ -7,17 +7,23 @@ async function clearAllTables() {
 
     // Truncate tables in order (child tables first)
     await pool.query(`
-      TRUNCATE TABLE 
-        indent_items,
-        purchase_order_items,
-        raw_material_batches,
-        indents,
-        purchase_orders,
-        raw_materials,
-        vendors,
-        users
-      RESTART IDENTITY CASCADE;
-    `);
+  TRUNCATE TABLE 
+    batch_consumptions,
+    grn_items,
+    grns,
+    purchase_order_items,
+    purchase_orders,
+    indent_items,
+    indents,
+    raw_material_batches,
+    raw_materials,
+    vendors,
+    production_batches,
+    audit_logs,
+    users,
+    operation_expenses
+  RESTART IDENTITY CASCADE;
+`);
 
     // Re-enable foreign key constraints
     await pool.query('SET session_replication_role = DEFAULT;');
