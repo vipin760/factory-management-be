@@ -6,6 +6,7 @@ routes.use(authenticate)
 routes.post('/',productionController.createproduction)
 routes.get('/',productionController.fetchproduction)
 routes.put('/:id',productionController.updateproduction)
+routes.delete('/:id',productionController.deleteproduction)
 routes.get('/batch',productionController.fetchBatchesName)
 
 

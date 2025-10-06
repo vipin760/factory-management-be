@@ -8,23 +8,26 @@ async function clearAllTables() {
     // Truncate tables in order (child tables first)
     const data = await pool.query(`
   TRUNCATE TABLE 
-    batch_consumptions,
+  batch_consumptions,
+  batch_raw_material_consumptions,
     grn_items,
     grns,
     purchase_order_items,
     purchase_orders,
-    indent_items,
     indents,
     raw_material_batches,
     raw_materials,
     vendors,
     production_batches,
     audit_logs,
-    users,
-    operation_expenses
+    operation_expenses,
+    batches,
+    products,
+    ordered_item_history,
+    batch_expenses
   RESTART IDENTITY CASCADE;
 `);
-
+//  users,
     // Re-enable foreign key constraints
     await pool.query('SET session_replication_role = DEFAULT;');
 
@@ -44,21 +47,25 @@ async function dropAllTables() {
     // Drop tables in order (child tables first)
     const tables = [
       'batch_consumptions',
+      'batch_raw_material_consumptions',
       'grn_items',
       'grns',
       'purchase_order_items',
       'purchase_orders',
-      'indent_items',
       'indents',
       'raw_material_batches',
       'raw_materials',
       'vendors',
       'production_batches',
       'audit_logs',
-      'users',
-      'operation_expenses'
-    ];
+      'operation_expenses',
+      'batches',
+      'products',
+      'ordered_item_history',
+      'batch_expenses'
 
+    ];
+//  'users',
     for (const table of tables) {
       await pool.query(`DROP TABLE IF EXISTS ${table} CASCADE;`);
     }

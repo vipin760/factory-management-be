@@ -22,10 +22,9 @@ exports.fetchBatchesName = catchAsync( async(req ,res ,next)=>{
 })
 
 exports.deleteproduction = catchAsync( async(req ,res ,next)=>{
-    const {status, data, message} = await productionServices.deleteproductionOrderService(req.params.id);
+    const {status, data, message} = await productionServices.deleteProductionService(req.params.id);
     if(!status) return next(new ErrorHandler(message,400));
-   const { productions,total,page,limit } = data
-    return res.status(200).send({status,data:productions,total,page,limit,message})
+    return res.status(200).send({status,message})
 })
 
 exports.updateproduction = catchAsync( async(req ,res ,next)=>{

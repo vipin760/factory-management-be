@@ -10,9 +10,7 @@ const app = express()
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-app.use(morgan('combined', {
-    stream: { write: (message) => logger.http(message.trim()) }
-}))
+app.use(morgan('dev'));
 app.use(express.json())
 app.use(cors());
 
@@ -28,6 +26,9 @@ const userRoutes = require('./routes/user.route')
 const productionRoutes = require('./routes/production.route')
 const reportsRoutes = require('./routes/reports.route')
 const expenditureRoutes = require('./routes/expenditure.route')
+const productRoutes = require('./routes/product.route')
+const batchRoutes = require('./routes/batch.route')
+const historyRoutes = require('./routes/history.routes')
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -43,6 +44,9 @@ app.use("/api/user",userRoutes);
 app.use("/api/production",productionRoutes)
 app.use("/api/report",reportsRoutes)
 app.use("/api/expenditure",expenditureRoutes)
+app.use("/api/product",productRoutes)
+app.use("/api/batch",batchRoutes)
+app.use("/api/logs",historyRoutes)
 
 //error middleware
 app.use(errorMiddleare);

@@ -3,7 +3,7 @@ const purchaseServices = require("../services/purchase.services");
 const ErrorHandler = require("../utils/errorHandler");
 
 exports.createPurchase = catchAsync( async(req ,res ,next)=>{
-    const {status, data, message} = await purchaseServices.createNewPurchaseOrderService(req.body,req.user.id);
+    const {status, data, message} = await purchaseServices.createNewPurchaseOrderService(req.body,req.user.id, req.user.role);
     if(!status) return next(new ErrorHandler(message,400));
     return res.status(200).send({status,data,message})
 })
