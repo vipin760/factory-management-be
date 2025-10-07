@@ -4,6 +4,7 @@ const { validate: isUuid } = require('uuid');
 
 exports.createProductionService = async (body, userId) => {
   const client = await pool.connect();
+  let started = false;
   try {
     const {
       batch_no,
@@ -21,168 +22,123 @@ exports.createProductionService = async (body, userId) => {
     // -------------------- VALIDATION --------------------
     if (!batch_no) return { status: false, message: "Batch number is required." };
     if (!isUuid(batch_no)) {
-      return {
-        status: false,
-        message: "Please enter a valid batch number"
-      };
+      return { status: false, message: "Please enter a valid batch number" };
     }
     if (!product_id) return { status: false, message: "Product ID is required." };
-    if (!planned_qty || planned_qty <= 0) return { status: false, message: "Planned quantity must be greater than 0." };
+    if (!planned_qty || planned_qty <= 0)
+      return { status: false, message: "Planned quantity must be greater than 0." };
 
-    if (!Array.isArray(batch_consumptions) || batch_consumptions.length === 0) {
+    if (!Array.isArray(batch_consumptions) || batch_consumptions.length === 0)
       return { status: false, message: "At least one raw material consumption is required." };
-    }
 
-    if (!Array.isArray(operation_expenses)) {
+    if (!Array.isArray(operation_expenses))
       return { status: false, message: "Operation expenses must be an array (can be empty)." };
-    }
 
     // Begin transaction
     await client.query("BEGIN");
+    started = true;
 
-    const batchExist = await sqlQueryFun(`SELECT batch_no FROM batches WHERE id=$1`, [batch_no])
-    if (!batchExist) {
+    // Check if batch exists
+    const batchExist = await client.query(`SELECT batch_no FROM batches WHERE id=$1`, [batch_no]);
+    if (batchExist.rows.length === 0) {
       await client.query("ROLLBACK");
-      return { status: false, message: "could not find this batch number" };
+      return { status: false, message: "Could not find this batch number" };
     }
-    // Check for duplicate batch_no
-    const existingBatch = await sqlQueryFun(
-      `SELECT id FROM production_batches WHERE batch_id = $1`,
-      [batch_no],
-      client
-    );
 
-    if (existingBatch.length > 0) {
+    // Check for duplicate batch_no
+    const existingBatch = await client.query(
+      `SELECT id FROM production_batches WHERE batch_id = $1`,
+      [batch_no]
+    );
+    if (existingBatch.rows.length > 0) {
       await client.query("ROLLBACK");
       return { status: false, message: "Batch number already exists." };
     }
 
-    const productExist = await sqlQueryFun(`SELECT product_name FROM products WHERE id=$1`, [product_id])
-    if (!productExist.length) {
+    // Check if product exists
+    const productExist = await client.query(`SELECT product_name FROM products WHERE id=$1`, [product_id]);
+    if (productExist.rows.length === 0) {
       await client.query("ROLLBACK");
-      return { status: false, message: `Cannot find the specified product in your collection. Please check the Product ID.` }
+      return { status: false, message: "Product not found. Please check the Product ID." };
     }
 
     // Step 1: Insert production batch
-    // const insertBatchQuery = ` INSERT INTO production_batches ( batch_id, product_id, article_sku, planned_qty, produced_qty) VALUES ($1, $2, $3, $4, $5) RETURNING *`
-    // const values =[
-    //   batch_no,
-    //   product_id,
-    //   article_sku || null,
-    //   planned_qty,
-    //   produced_qty || 0
-    // ]
-    // const batchResult = await sqlQueryFun(insertBatchQuery, values, client);
-    const insertBatchQuery = `INSERT INTO production_batches (
-    batch_id, product_id, article_sku, planned_qty, produced_qty
-  )
-  VALUES ($1, $2, $3, $4, $5)
-  RETURNING *;
-`;
-
+    const insertBatchQuery = `
+      INSERT INTO production_batches (
+        batch_id, product_id, article_sku, planned_qty, produced_qty
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *;
+    `;
     const values = [
-      batch_no,        // this is actually batch_id (UUID from batches)
+      batch_no,
       product_id,
       article_sku || null,
       planned_qty,
       produced_qty || 0
     ];
+    const batchResult = await client.query(insertBatchQuery, values);
+    const newBatch = batchResult.rows[0];
 
-    const batchResult = await sqlQueryFun(insertBatchQuery, values, client);
-    const newBatch = batchResult[0];
-
-    // Step 2: Insert batch_raw_material_consumptions & check stock
-    // Step 2: Insert batch_raw_material_consumptions & check stock
+    // Step 2: Handle raw material consumptions
     const insertedConsumptions = [];
-    for (const item of batch_consumptions) {
-      const { raw_material_id, qty_consumed, rate } = item;
+    for (const { raw_material_id, qty_consumed, rate } of batch_consumptions) {
+      if (!raw_material_id) return { status:false, message:"Raw material ID is required in consumption."}
+      if (!qty_consumed || qty_consumed <= 0)
+        return { status:false, message:"Quantity consumed must be greater than 0."}
+      if (rate == null || rate < 0)
+        return { status:false,message:"Rate must be a non-negative number."}
 
-      if (!raw_material_id){
-        await client.query("ROLLBACK");
-        throw new Error("Raw material ID is required in consumption.");
-      } 
-      if (!qty_consumed || qty_consumed <= 0){
-        await client.query("ROLLBACK");
-        throw new Error("Quantity consumed must be greater than 0.");
-      }
-      if (rate == null || rate < 0){
-        await client.query("ROLLBACK");
-        throw new Error("Rate must be a non-negative number.");
-      }
-        
-
-      // 🔒 Lock the row for stock consistency during transaction
-      const stockCheck = await sqlQueryFun(
-        `SELECT total_qty FROM raw_materials WHERE id = $1 FOR UPDATE`,
-        [raw_material_id],
-        client
+      // Lock row for stock consistency
+      const stockCheck = await client.query(
+        `SELECT total_qty,name FROM raw_materials WHERE id = $1 FOR UPDATE`,
+        [raw_material_id]
       );
 
-      if (stockCheck.length === 0)
-        throw new Error(`Raw material not found: ${raw_material_id}`);
+      if (stockCheck.rows.length === 0)
+        return { status:false,message:`Raw material not found: ${raw_material_id}`}
 
-      const available = Number(stockCheck[0].total_qty);
+      const available = Number(stockCheck.rows[0].total_qty);
       if (available < qty_consumed) {
-        throw new Error(
-          `Insufficient stock for raw material ${raw_material_id}. Available: ${available}, Required: ${qty_consumed}`
-        );
+        return { status:false,message:`Insufficient stock for raw material '${stockCheck.rows[0].name}'. Available: ${available}, Required: ${qty_consumed}`}
       }
 
-      // ✅ Deduct stock safely
+      // Update stock
       const newQty = available - qty_consumed;
-      await sqlQueryFun(
-        `UPDATE raw_materials 
-     SET total_qty = $1
-     WHERE id = $2`,
-        [newQty, raw_material_id],
-        client
+      await client.query(
+        `UPDATE raw_materials SET total_qty = $1 WHERE id = $2`,
+        [newQty, raw_material_id]
       );
 
-      // 🧾 Log the consumption record
-      const insertConsumptionQuery = `
-    INSERT INTO batch_raw_material_consumptions (
-      production_batch_id, raw_material_id, qty_consumed, rate
-    ) VALUES ($1, $2, $3, $4)
-    RETURNING *;
-  `;
-
-      const consumptionResult = await sqlQueryFun(
-        insertConsumptionQuery,
-        [newBatch.id, raw_material_id, qty_consumed, rate],
-        client
+      // Insert consumption record
+      const insertConsumption = await client.query(
+        `INSERT INTO batch_raw_material_consumptions (
+          production_batch_id, raw_material_id, qty_consumed, rate
+        ) VALUES ($1, $2, $3, $4)
+        RETURNING *;`,
+        [newBatch.id, raw_material_id, qty_consumed, rate]
       );
-
-      insertedConsumptions.push(consumptionResult[0]);
+      insertedConsumptions.push(insertConsumption.rows[0]);
     }
 
-    // Step 3: Insert batch_expenses
-const insertedExpenses = [];
-for (const expense of operation_expenses) {
-  const { expense_category, description, qty, rate } = expense;
+    // Step 3: Insert operation expenses
+    const insertedExpenses = [];
+    for (const expense of operation_expenses) {
+      const { expense_category, description, qty, rate } = expense;
 
-  if (!expense_category)
-    throw new Error("Expense category is required.");
-  if (qty == null || qty < 0)
-    throw new Error("Expense quantity must be a non-negative number.");
-  if (rate == null || rate < 0)
-    throw new Error("Expense rate must be a non-negative number.");
+      if (!expense_category) return { status:false,message:`Expense category is required.`}
+      if (qty == null || qty < 0) return { status:false, message:`Expense quantity must be a non-negative number.`}
+      if (rate == null || rate < 0) return { status:false,message:`Expense rate must be a non-negative number.`}
 
-  const insertExpenseQuery = `
-    INSERT INTO batch_expenses (
-      production_batch_id, expense_category, description, qty, rate
-    ) VALUES ($1, $2, $3, $4, $5)
-    RETURNING *;
-  `;
-
-  const expenseResult = await sqlQueryFun(
-    insertExpenseQuery,
-    [newBatch.id, expense_category, description || null, qty, rate],
-    client
-  );
-
-  insertedExpenses.push(expenseResult[0]);
-}
-
+      const insertExpense = await client.query(
+        `INSERT INTO batch_expenses (
+          production_batch_id, expense_category, description, qty, rate
+        ) VALUES ($1, $2, $3, $4, $5)
+        RETURNING *;`,
+        [newBatch.id, expense_category, description || null, qty, rate]
+      );
+      insertedExpenses.push(insertExpense.rows[0]);
+    }
 
     // Commit transaction
     await client.query("COMMIT");
@@ -197,7 +153,7 @@ for (const expense of operation_expenses) {
       }
     };
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (started) await client.query("ROLLBACK");
     return {
       status: false,
       message: `Failed to create production batch. (${error.message})`
@@ -389,53 +345,157 @@ exports.productionBatchNamesOnly = async () => {
   }
 };
 
-exports.updateProductionService = async (id, body) => {
+exports.updateProductionService = async ( production_batch_id,body) => {
+  const client = await pool.connect();
+  let started = false;
+
   try {
-    const fields = [];
-    const values = [];
-    let idx = 1;
+    const {
+      batch_no,
+      product_id,
+      article_sku,
+      planned_qty,
+      produced_qty,
+      batch_consumptions = [],
+      operation_expenses = []
+    } = body;
 
-    for (const [key, value] of Object.entries(body)) {
-      fields.push(`${key} = $${idx}`);
-      values.push(value);
-      idx++;
-    }
+    // -------- Basic Validation --------
+    if (!production_batch_id)
+      return { status: false, message: "Production batch ID is required." };
+    if (!isUuid(production_batch_id))
+      return { status: false, message: "Invalid production batch ID." };
+    if (!batch_no)
+      return { status: false, message: "Batch number is required." };
+    if (!product_id)
+      return { status: false, message: "Product ID is required." };
+    if (!planned_qty || planned_qty <= 0)
+      return { status: false, message: "Planned quantity must be greater than 0." };
 
-    if (fields.length === 0) {
-      return {
-        status: false,
-        message: "No fields provided to update."
-      };
-    }
+    await client.query("BEGIN");
+    started = true;
 
-    values.push(id); // last param is id
-
-    const query = `
-      UPDATE production_batches
-      SET ${fields.join(", ")}
-      WHERE id = $${idx}
-      RETURNING *;
-    `;
-
-    const result = await sqlQueryFun(query, values);
-
-    if (result.length === 0) {
+    // -------- Check if production batch exists --------
+    const existingBatch = await client.query(
+      `SELECT id FROM production_batches WHERE id = $1`,
+      [production_batch_id]
+    );
+    if (existingBatch.rows.length === 0) {
+      await client.query("ROLLBACK");
       return { status: false, message: "Production batch not found." };
     }
 
+    // -------- Step 1: Revert previous raw material stock --------
+    const prevConsumptions = await client.query(
+      `SELECT raw_material_id, qty_consumed FROM batch_raw_material_consumptions WHERE production_batch_id = $1`,
+      [production_batch_id]
+    );
+
+    for (const prev of prevConsumptions.rows) {
+      await client.query(
+        `UPDATE raw_materials SET total_qty = total_qty + $1 WHERE id = $2`,
+        [prev.qty_consumed, prev.raw_material_id]
+      );
+    }
+
+    // -------- Step 2: Delete old records (consumptions & expenses) --------
+    await client.query(
+      `DELETE FROM batch_raw_material_consumptions WHERE production_batch_id = $1`,
+      [production_batch_id]
+    );
+    await client.query(
+      `DELETE FROM batch_expenses WHERE production_batch_id = $1`,
+      [production_batch_id]
+    );
+
+    // -------- Step 3: Update main production batch --------
+    console.log("<><>batch_no",batch_no)
+    const updatedBatchRes = await client.query(
+      `UPDATE production_batches
+       SET batch_id = $1, product_id = $2, article_sku = $3, planned_qty = $4, produced_qty = $5
+       WHERE id = $6
+       RETURNING *`,
+      [batch_no, product_id, article_sku || null, planned_qty, produced_qty || 0, production_batch_id]
+    );
+
+    const updatedBatch = updatedBatchRes.rows[0];
+
+    // -------- Step 4: Insert new consumptions --------
+    const insertedConsumptions = [];
+    for (const { raw_material_id, qty_consumed, rate } of batch_consumptions) {
+      if (!raw_material_id || qty_consumed <= 0)
+        throw new Error("Invalid raw material consumption data.");
+
+      const stockCheck = await client.query(
+        `SELECT total_qty, name FROM raw_materials WHERE id = $1 FOR UPDATE`,
+        [raw_material_id]
+      );
+      if (stockCheck.rows.length === 0)
+        throw new Error(`Raw material not found (${raw_material_id}).`);
+
+      const available = Number(stockCheck.rows[0].total_qty);
+      if (available < qty_consumed)
+        throw new Error(
+          `Insufficient stock for '${stockCheck.rows[0].name}'. Available: ${available}, Required: ${qty_consumed}`
+        );
+
+      await client.query(
+        `UPDATE raw_materials SET total_qty = $1 WHERE id = $2`,
+        [available - qty_consumed, raw_material_id]
+      );
+
+      const inserted = await client.query(
+        `INSERT INTO batch_raw_material_consumptions
+         (production_batch_id, raw_material_id, qty_consumed, rate)
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`,
+        [production_batch_id, raw_material_id, qty_consumed, rate]
+      );
+      insertedConsumptions.push(inserted.rows[0]);
+    }
+
+    // -------- Step 5: Insert updated operation expenses --------
+    const insertedExpenses = [];
+    for (const { expense_category, description, qty, rate } of operation_expenses) {
+      if (!expense_category)
+        throw new Error("Expense category is required.");
+      if (qty < 0 || rate < 0)
+        throw new Error("Expense quantity and rate must be non-negative.");
+
+      const inserted = await client.query(
+        `INSERT INTO batch_expenses
+         (production_batch_id, expense_category, description, qty, rate)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`,
+        [production_batch_id, expense_category, description || null, qty, rate]
+      );
+      insertedExpenses.push(inserted.rows[0]);
+    }
+
+    // -------- Step 6: Commit transaction --------
+    await client.query("COMMIT");
+
     return {
       status: true,
-      data: result[0],
-      message: "Production updated successfully."
+      message: "Production batch updated successfully.",
+      data: {
+        ...updatedBatch,
+        batch_raw_material_consumptions: insertedConsumptions,
+        batch_expenses: insertedExpenses
+      }
     };
-
   } catch (error) {
+    console.log("<><>error", error)
+    if (started) await client.query("ROLLBACK");
     return {
       status: false,
-      message: `Something went wrong. (${error.message})`,
+      message: `Failed to update production batch. (${error.message})`
     };
+  } finally {
+    client.release();
   }
 };
+
 
 exports.deleteProductionService = async (productionBatchId) => {
   const client = await pool.connect();
