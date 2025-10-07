@@ -496,7 +496,6 @@ exports.updateProductionService = async ( production_batch_id,body) => {
   }
 };
 
-
 exports.deleteProductionService = async (productionBatchId) => {
   const client = await pool.connect();
 

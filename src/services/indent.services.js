@@ -167,7 +167,7 @@ exports.deleteIndentService = async (id) => {
   } catch (error) {
     return { status: false, data: [], message: error.message }
   }
-}
+};
 
 exports.updateIndentService1 = async (body, id) => {
   try {
@@ -208,7 +208,7 @@ exports.updateIndentService1 = async (body, id) => {
   } catch (error) {
     return { status: false, data: [], message: error.message }
   }
-}
+};
 
 exports.updateIndentService = async (body, id, userId) => {
   const client = await pool.connect();
@@ -263,8 +263,6 @@ exports.updateIndentService = async (body, id, userId) => {
     client.release();
   }
 };
-
-
 
 exports.getIndentByIdService = async (id) => {
   try {
@@ -326,5 +324,3 @@ exports.getIndentByIdService = async (id) => {
     };
   }
 };
-
-
