@@ -1,4 +1,7 @@
 const { pool } = require("../config/database");
+const fs = require('fs');
+const path = require('path');
+const { sqlQueryFun } = require("../database/sql/sqlFunction");
 
 exports.fileUploadService1 = async (body, userId, filesObj) => {
     const client = await pool.connect();
@@ -99,4 +102,59 @@ exports.fileUploadService = async (body, userId, filesObj) => {
     }
 };
 
+exports.deleteFileService = async (fileId, userId) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // ✅ 1. Fetch file details from DB
+        const fileRes = await client.query(
+            `SELECT id, file_url, uploaded_by 
+             FROM purchase_order_files 
+             WHERE id = $1`,
+            [fileId]
+        );
+
+        if (fileRes.rowCount === 0) {
+            return { status: false, message: 'File not found.' };
+        }
+
+        const fileData = fileRes.rows[0];
+
+        // (Optional) ✅ Check if the user deleting is the one who uploaded
+        if (fileData.uploaded_by !== userId) {
+            return { status: false, message: 'Unauthorized action.' };
+        }
+
+        // ✅ 2. Delete file record from DB
+        await client.query(
+            `DELETE FROM purchase_order_files WHERE id = $1`,
+            [fileId]
+        );
+
+        // ✅ 3. Delete file from local storage
+        const filePath = path.resolve(fileData.file_url);
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+
+        await client.query('COMMIT');
+        return { status: true, message: 'File deleted successfully.' };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('File delete error:', error);
+        return { status: false, message: `Something went wrong (${error.message})` };
+    } finally {
+        client.release();
+    }
+};
+
+exports.getAllFilesService = async()=>{
+    try {
+        const result = await sqlQueryFun(`SELECT * FROM purchase_order_files`)
+        return { status:true, data:result, message:"data fetched"}
+    } catch (error) {
+        return { status:false,message:`something went wrong (${error.message})`}
+    }
+}
 

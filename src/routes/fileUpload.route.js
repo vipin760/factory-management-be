@@ -15,5 +15,7 @@ routes.post(
   ]),
   fileUploadController.fileUploadControllerFun
 );
+routes.get('/', fileUploadController.fetchFileController);
+routes.delete('/:fileId', fileUploadController.deleteFileController);
 
 module.exports = routes;

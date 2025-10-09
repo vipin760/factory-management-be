@@ -14,6 +14,12 @@ exports.getAllgrn = catchAsync( async(req ,res ,next)=>{
     return res.status(200).send({status,data,message})
 })
 
+exports.getSinlgegrn = catchAsync( async(req ,res ,next)=>{
+    const {status, data, message} = await grnServices.getSingleGrnService(req.params.id);
+    if(!status) return next(new ErrorHandler(message,400));
+    return res.status(200).send({status,data,message})
+})
+
 exports.deletegrn = catchAsync( async(req ,res ,next)=>{
     const {status, data, message} = await grnServices.deleteGrnService(req.params.id);
     if(!status) return next(new ErrorHandler(message,400));
