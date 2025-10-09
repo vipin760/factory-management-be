@@ -192,22 +192,22 @@ exports.getMonthlyExpensesReportService1 = async () => {
 };
 
 // expenditure.services.js
-exports.getMonthlyExpensesReportService = async (params = {}) => {
-  const client = await pool.connect();
+exports.getMonthlyExpensesReportService2 = async (params = {}) => {
+    const client = await pool.connect();
 
-  try {
-    const {
-      page = 1,
-      limit = 20,
-      category = null,
-      type = null,
-      startDate = null,
-      endDate = null,
-      search = null,
-      sortBy = 'date',
-    } = params;
+    try {
+        const {
+            page = 1,
+            limit = 20,
+            category = "",
+            type = '',
+            startDate = null,
+            endDate = null,
+            search = null,
+            sortBy = 'date',
+        } = params;
 
-     const monthlyCostsQuery = `
+        const monthlyCostsQuery = `
             SELECT
                 TO_CHAR(pb.created_at, 'YYYY-MM') AS month,
                 COALESCE(SUM(brmc.qty_consumed * brmc.rate), 0) AS total_material_cost,
@@ -268,11 +268,11 @@ exports.getMonthlyExpensesReportService = async (params = {}) => {
             };
         });
 
-    const offset = (page - 1) * limit;
-    const orderBy = sortBy === 'amount' ? 'amount DESC' : 'date DESC';
+        const offset = (page - 1) * limit;
+        const orderBy = sortBy === 'amount' ? 'amount DESC' : 'date DESC';
 
-    // 1️⃣ Summary Query
-    const summaryQuery = `
+        // 1️⃣ Summary Query
+        const summaryQuery = `
       SELECT
         COALESCE(SUM(brmc.qty_consumed * brmc.rate),0) AS total_material_cost,
         COALESCE(SUM(be.total_cost),0) AS total_production_cost,
@@ -287,11 +287,11 @@ exports.getMonthlyExpensesReportService = async (params = {}) => {
       WHERE ($1::date IS NULL OR pb.created_at >= $1)
         AND ($2::date IS NULL OR pb.created_at <= $2);
     `;
-    const summaryResult = await client.query(summaryQuery, [startDate, endDate]);
-    const summary = summaryResult.rows[0];
+        const summaryResult = await client.query(summaryQuery, [startDate, endDate]);
+        const summary = summaryResult.rows[0];
 
-    // 2️⃣ Detailed Data with Pagination
-    const detailedQuery = `
+        // 2️⃣ Detailed Data with Pagination
+        const detailedQuery = `
       SELECT * FROM (
         -- Materials
         SELECT 
@@ -353,18 +353,18 @@ exports.getMonthlyExpensesReportService = async (params = {}) => {
       ORDER BY ${orderBy}
       LIMIT $5::INTEGER OFFSET $6::INTEGER;
     `;
-    const detailedResult = await client.query(detailedQuery, [
-      startDate,
-      endDate,
-      category,
-      type,
-      limit,
-      offset,
-      search,
-    ]);
+        const detailedResult = await client.query(detailedQuery, [
+            startDate,
+            endDate,
+            category,
+            type,
+            limit,
+            offset,
+            search,
+        ]);
 
-    // 3️⃣ Count Query (⚠️ limit/offset removed here)
-    const countQuery = `
+        // 3️⃣ Count Query (⚠️ limit/offset removed here)
+        const countQuery = `
       SELECT COUNT(*) AS total_count FROM (
         SELECT po.purchase_order_id::text AS id
         FROM purchase_order_items poi
@@ -401,34 +401,279 @@ exports.getMonthlyExpensesReportService = async (params = {}) => {
           AND ($5::text IS NULL OR 'Factory Utilities' ILIKE '%' || $5 || '%')
       ) AS combined;
     `;
-    const countResult = await client.query(countQuery, [
-      category,
-      type,
-      startDate,
-      endDate,
-      search,
-    ]);
+        const countResult = await client.query(countQuery, [
+            category,
+            type,
+            startDate,
+            endDate,
+            search,
+        ]);
 
-    const totalItems = Number(countResult.rows[0].total_count || 0);
-    const totalPages = Math.ceil(totalItems / limit);
+        const totalItems = Number(countResult.rows[0].total_count || 0);
+        const totalPages = Math.ceil(totalItems / limit);
 
-    return {
-      status: true,
-      summary,
-      data: detailedResult.rows,
-      page,
-      limit,
-      totalItems,
-      totalPages,
-      monthlyCosts
-    };
-  } catch (err) {
-    console.error(err);
-    return { status: false, message: err.message };
-  } finally {
-    client.release();
-  }
+        return {
+            status: true,
+            summary,
+            data: detailedResult.rows,
+            page,
+            limit,
+            totalItems,
+            totalPages,
+            monthlyCosts
+        };
+    } catch (err) {
+        console.error(err);
+        return { status: false, message: err.message };
+    } finally {
+        client.release();
+    }
 };
+
+exports.getMonthlyExpensesReportService = async (params = {}) => {
+    const client = await pool.connect();
+
+    try {
+        const {
+            page = 1,
+            limit = 20,
+            category: rawCategory = null,
+            type: rawType = null,
+            startDate = null,
+            endDate = null,
+            search: rawSearch = null,
+            sortBy = 'date',
+        } = params;
+
+        // ✅ Convert empty strings to NULL to make SQL filtering work
+        const category = rawCategory && rawCategory.trim() !== '' ? rawCategory : null;
+        const type = rawType && rawType.trim() !== '' ? rawType : null;
+        const search = rawSearch && rawSearch.trim() !== '' ? rawSearch : null;
+
+        const offset = (page - 1) * limit;
+        const orderBy = sortBy === 'amount' ? 'amount DESC' : 'date DESC';
+
+        // 🟡 1️⃣ Monthly Summary (for charts)
+        const monthlyCostsQuery = `
+      SELECT
+          TO_CHAR(pb.created_at, 'YYYY-MM') AS month,
+          COALESCE(SUM(brmc.qty_consumed * brmc.rate), 0) AS total_material_cost,
+          COALESCE(SUM(be.total_cost), 0) AS total_operation_expense,
+          COALESCE(SUM(CASE WHEN be.expense_category='utility' THEN be.total_cost ELSE 0 END), 0) AS utility_expense,
+          (COALESCE(SUM(brmc.qty_consumed * brmc.rate), 0) + COALESCE(SUM(be.total_cost), 0)) AS total_production_cost,
+          (COALESCE(SUM(brmc.qty_consumed * brmc.rate), 0) + COALESCE(SUM(be.total_cost), 0)) AS grand_total_cost,
+          MAX(pb.created_at) AS last_updated
+      FROM production_batches pb
+      LEFT JOIN batch_raw_material_consumptions brmc ON pb.id = brmc.production_batch_id
+      LEFT JOIN batch_expenses be ON pb.id = be.production_batch_id
+      GROUP BY TO_CHAR(pb.created_at, 'YYYY-MM')
+      ORDER BY month ASC;
+    `;
+        const monthlyCostsResult = await client.query(monthlyCostsQuery);
+
+        const monthlyCosts = monthlyCostsResult.rows.map((row, index, arr) => {
+            const current = {
+                month: row.month,
+                total_material_cost: Number(row.total_material_cost),
+                total_operation_expense: Number(row.total_operation_expense),
+                utility_expense: Number(row.utility_expense),
+                total_production_cost: Number(row.total_production_cost),
+                grand_total_cost: Number(row.grand_total_cost),
+                last_updated: row.last_updated,
+            };
+
+            if (index === 0) {
+                return {
+                    ...current,
+                    change_from_last_month: {
+                        total_material_cost: "0",
+                        total_operation_expense: "0",
+                        utility_expense: "0",
+                        total_production_cost: "0",
+                        grand_total_cost: "0",
+                    },
+                };
+            }
+
+            const prev = arr[index - 1];
+            const calcChange = (cur, prev) => {
+                if (prev === 0) return cur === 0 ? 0 : "N/A";
+                return parseFloat((((cur - prev) / prev) * 100).toFixed(2));
+            };
+
+            return {
+                ...current,
+                change_from_last_month: {
+                    total_material_cost: calcChange(current.total_material_cost, Number(prev.total_material_cost)),
+                    total_operation_expense: calcChange(current.total_operation_expense, Number(prev.total_operation_expense)),
+                    utility_expense: calcChange(current.utility_expense, Number(prev.utility_expense)),
+                    total_production_cost: calcChange(current.total_production_cost, Number(prev.total_production_cost)),
+                    grand_total_cost: calcChange(current.grand_total_cost, Number(prev.grand_total_cost)),
+                },
+            };
+        });
+
+        // 🟡 2️⃣ Summary Total Values
+        const summaryQuery = `
+      SELECT
+        COALESCE(SUM(brmc.qty_consumed * brmc.rate),0) AS total_material_cost,
+        COALESCE(SUM(be.total_cost),0) AS total_production_cost,
+        COALESCE(SUM(oe.amount),0) AS total_operations_cost,
+        (COALESCE(SUM(brmc.qty_consumed * brmc.rate),0) +
+         COALESCE(SUM(be.total_cost),0) +
+         COALESCE(SUM(oe.amount),0)) AS total_expenses
+      FROM production_batches pb
+      LEFT JOIN batch_raw_material_consumptions brmc ON pb.id = brmc.production_batch_id
+      LEFT JOIN batch_expenses be ON pb.id = be.production_batch_id
+      LEFT JOIN operation_expenses oe ON pb.id = oe.production_batch_id
+      WHERE ($1::date IS NULL OR pb.created_at >= $1)
+        AND ($2::date IS NULL OR pb.created_at <= $2);
+    `;
+        const summaryResult = await client.query(summaryQuery, [startDate, endDate]);
+        const summary = summaryResult.rows[0];
+
+        // 🟡 3️⃣ Detailed Data (with filters, pagination & search)
+        const detailedQuery = `
+      SELECT * FROM (
+        -- Material Cost
+        SELECT 
+          rm.name || ' Purchase' AS title,
+          (poi.qty * poi.rate)::numeric AS amount,
+          'cost' AS type,
+          'material' AS category,
+          po.purchase_order_id::text AS ref_no,
+          po.order_date AS date
+        FROM purchase_order_items poi
+        JOIN purchase_orders po ON po.id = poi.purchase_order_id
+        JOIN raw_materials rm ON rm.id = poi.raw_material_id
+        WHERE ($3::text IS NULL OR 'material' = $3)
+          AND ($4::text IS NULL OR 'cost' = $4)
+          AND ($1::date IS NULL OR po.order_date >= $1)
+          AND ($2::date IS NULL OR po.order_date <= $2)
+          AND ($7::text IS NULL OR rm.name ILIKE '%' || $7 || '%' OR po.purchase_order_id::text ILIKE '%' || $7 || '%')
+
+        UNION ALL
+
+        -- Production Cost
+        SELECT 
+          'Production Batch - ' || p.product_name AS title,
+          (COALESCE(SUM(brmc.qty_consumed * brmc.rate),0) + COALESCE(SUM(be.total_cost),0))::numeric AS amount,
+          'cost' AS type,
+          'production' AS category,
+          pb.batch_id::text AS ref_no,
+          pb.created_at AS date
+        FROM production_batches pb
+        JOIN products p ON p.id = pb.product_id
+        LEFT JOIN batch_raw_material_consumptions brmc ON pb.id = brmc.production_batch_id
+        LEFT JOIN batch_expenses be ON pb.id = be.production_batch_id
+        WHERE ($3::text IS NULL OR 'production' = $3)
+          AND ($4::text IS NULL OR 'cost' = $4)
+          AND ($1::date IS NULL OR pb.created_at >= $1)
+          AND ($2::date IS NULL OR pb.created_at <= $2)
+          AND ($7::text IS NULL OR p.product_name ILIKE '%' || $7 || '%' OR pb.batch_id::text ILIKE '%' || $7 || '%')
+        GROUP BY pb.id, p.product_name
+
+        UNION ALL
+
+        -- Operation / Utility Expenses
+        SELECT
+          'Factory Utilities' AS title,
+          SUM(total_cost)::numeric AS amount,
+          'expense' AS type,
+          'operation' AS category,
+          NULL::text AS ref_no,
+          created_at AS date
+        FROM batch_expenses
+        WHERE expense_category='utility'
+          AND ($3::text IS NULL OR 'operation' = $3)
+          AND ($4::text IS NULL OR 'expense' = $4)
+          AND ($1::date IS NULL OR created_at >= $1)
+          AND ($2::date IS NULL OR created_at <= $2)
+          AND ($7::text IS NULL OR 'Factory Utilities' ILIKE '%' || $7 || '%')
+        GROUP BY created_at
+      ) AS combined
+      ORDER BY ${orderBy}
+      LIMIT $5::INTEGER OFFSET $6::INTEGER;
+    `;
+
+        const detailedResult = await client.query(detailedQuery, [
+            startDate,
+            endDate,
+            category,
+            type,
+            limit,
+            offset,
+            search,
+        ]);
+
+        // 🟡 4️⃣ Count Query
+        const countQuery = `
+      SELECT COUNT(*) AS total_count FROM (
+        SELECT po.purchase_order_id::text AS id
+        FROM purchase_order_items poi
+        JOIN purchase_orders po ON po.id = poi.purchase_order_id
+        JOIN raw_materials rm ON rm.id = poi.raw_material_id
+        WHERE ($1::text IS NULL OR 'material' = $1)
+          AND ($2::text IS NULL OR 'cost' = $2)
+          AND ($3::date IS NULL OR po.order_date >= $3)
+          AND ($4::date IS NULL OR po.order_date <= $4)
+          AND ($5::text IS NULL OR rm.name ILIKE '%' || $5 || '%' OR po.purchase_order_id::text ILIKE '%' || $5 || '%')
+
+        UNION ALL
+
+        SELECT pb.batch_id::text AS id
+        FROM production_batches pb
+        JOIN products p ON p.id = pb.product_id
+        LEFT JOIN batch_raw_material_consumptions brmc ON pb.id = brmc.production_batch_id
+        LEFT JOIN batch_expenses be ON pb.id = be.production_batch_id
+        WHERE ($1::text IS NULL OR 'production' = $1)
+          AND ($2::text IS NULL OR 'cost' = $2)
+          AND ($3::date IS NULL OR pb.created_at >= $3)
+          AND ($4::date IS NULL OR pb.created_at <= $4)
+          AND ($5::text IS NULL OR p.product_name ILIKE '%' || $5 || '%' OR pb.batch_id::text ILIKE '%' || $5 || '%')
+
+        UNION ALL
+
+        SELECT created_at::text AS id
+        FROM batch_expenses
+        WHERE expense_category='utility'
+          AND ($1::text IS NULL OR 'operation' = $1)
+          AND ($2::text IS NULL OR 'expense' = $2)
+          AND ($3::date IS NULL OR created_at >= $3)
+          AND ($4::date IS NULL OR created_at <= $4)
+          AND ($5::text IS NULL OR 'Factory Utilities' ILIKE '%' || $5 || '%')
+      ) AS combined;
+    `;
+
+        const countResult = await client.query(countQuery, [
+            category,
+            type,
+            startDate,
+            endDate,
+            search,
+        ]);
+
+        const totalItems = Number(countResult.rows[0].total_count || 0);
+        const totalPages = Math.ceil(totalItems / limit);
+
+        return {
+            status: true,
+            summary,
+            data: detailedResult.rows,
+            page,
+            limit,
+            totalItems,
+            totalPages,
+            monthlyCosts,
+        };
+    } catch (err) {
+        console.error('❌ getMonthlyExpensesReportService Error:', err);
+        return { status: false, message: err.message };
+    } finally {
+        client.release();
+    }
+};
+
 
 
 
@@ -436,7 +681,7 @@ exports.getMonthlyExpensesReportService = async (params = {}) => {
 
 // filter query =(current_month,last_3_months,last_3_months,current_year ,startDate=,endDate=)
 // endpoint  http://localhost:5000/api/expenditure/report
-exports.reportAndAnalytics = async ({ filter = 'current_month', startDate = null, endDate = null }) => {
+exports.reportAndAnalytics1 = async ({ filter = 'current_month', startDate = null, endDate = null }) => {
     const client = await pool.connect();
     try {
         // 🧭 1️⃣ Define time filters dynamically
@@ -672,7 +917,490 @@ exports.reportAndAnalytics = async ({ filter = 'current_month', startDate = null
     }
 };
 
+exports.reportAndAnalytics2 = async ({ filter = 'current_month', startDate = null, endDate = null }) => {
+    const client = await pool.connect();
+    try {
+        // 🧭 1️⃣ Define time filters dynamically
+        let dateConditionPB = '';
+        let dateConditionPO = '';
+        let prevDateConditionPB = '';
+        let prevDateConditionPO = '';
 
+        if (filter === 'custom' && startDate && endDate) {
+            dateConditionPB = `pb.created_at BETWEEN '${startDate}' AND '${endDate}' AND b.status = 'completed'`;
+            dateConditionPO = `po.order_date BETWEEN '${startDate}' AND '${endDate}'`;
+
+            const prevStart = `date '${startDate}' - (date '${endDate}' - date '${startDate}') - interval '1 day'`;
+            const prevEnd = `date '${startDate}' - interval '1 day'`;
+            prevDateConditionPB = `pb.created_at BETWEEN ${prevStart} AND ${prevEnd} AND b.status = 'completed'`;
+            prevDateConditionPO = `po.order_date BETWEEN ${prevStart} AND ${prevEnd}`;
+        } else {
+            switch (filter) {
+                case 'last_month':
+                    dateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now() - interval '1 month')
+                        AND (date_trunc('month', now()) - interval '1 day')
+                        AND b.status = 'completed'
+                    `;
+                    dateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now() - interval '1 month')
+                        AND (date_trunc('month', now()) - interval '1 day')
+                    `;
+                    prevDateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now() - interval '2 month')
+                        AND (date_trunc('month', now() - interval '1 month') - interval '1 day')
+                        AND b.status = 'completed'
+                    `;
+                    prevDateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now() - interval '2 month')
+                        AND (date_trunc('month', now() - interval '1 month') - interval '1 day')
+                    `;
+                    break;
+
+                case 'last_3_months':
+                    dateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now() - interval '3 month')
+                        AND (date_trunc('month', now()) + interval '1 month' - interval '1 day')
+                        AND b.status = 'completed'
+                    `;
+                    dateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now() - interval '3 month')
+                        AND (date_trunc('month', now()) + interval '1 month' - interval '1 day')
+                    `;
+                    prevDateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now() - interval '6 month')
+                        AND (date_trunc('month', now() - interval '3 month') - interval '1 day')
+                        AND b.status = 'completed'
+                    `;
+                    prevDateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now() - interval '6 month')
+                        AND (date_trunc('month', now() - interval '3 month') - interval '1 day')
+                    `;
+                    break;
+
+                case 'current_year':
+                    dateConditionPB = `EXTRACT(YEAR FROM pb.created_at) = EXTRACT(YEAR FROM now()) AND b.status = 'completed'`;
+                    dateConditionPO = `EXTRACT(YEAR FROM po.order_date) = EXTRACT(YEAR FROM now())`;
+                    prevDateConditionPB = `EXTRACT(YEAR FROM pb.created_at) = EXTRACT(YEAR FROM now()) - 1 AND b.status = 'completed'`;
+                    prevDateConditionPO = `EXTRACT(YEAR FROM po.order_date) = EXTRACT(YEAR FROM now()) - 1`;
+                    break;
+
+                default: // current_month
+                    dateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now())
+                        AND (date_trunc('month', now()) + interval '1 month' - interval '1 day')
+                        AND b.status = 'completed'
+                    `;
+                    dateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now())
+                        AND (date_trunc('month', now()) + interval '1 month' - interval '1 day')
+                    `;
+                    prevDateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now() - interval '1 month')
+                        AND (date_trunc('month', now()) - interval '1 day')
+                        AND b.status = 'completed'
+                    `;
+                    prevDateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now() - interval '1 month')
+                        AND (date_trunc('month', now()) - interval '1 day')
+                    `;
+            }
+        }
+
+        // 🧾 2️⃣ KPI Query (Current & Previous)
+        const buildKPIQuery = (pbCond, poCond) => `
+            WITH current_production AS (
+                SELECT
+                    COALESCE(SUM(pb.produced_qty), 0) AS total_production,
+                    COALESCE(SUM(pb.produced_qty) / NULLIF(SUM(pb.planned_qty), 0), 0) AS efficiency
+                FROM production_batches pb
+                JOIN batches b ON pb.batch_id = b.id
+                WHERE ${pbCond}
+            ),
+            current_expenditures AS (
+                SELECT SUM(total_cost) AS total_expenditure FROM (
+                    SELECT brmc.total_cost FROM batch_raw_material_consumptions brmc
+                    JOIN production_batches pb ON brmc.production_batch_id = pb.id
+                    JOIN batches b ON pb.batch_id = b.id
+                    WHERE ${pbCond}
+                    UNION ALL
+                    SELECT be.total_cost FROM batch_expenses be
+                    JOIN production_batches pb ON be.production_batch_id = pb.id
+                    JOIN batches b ON pb.batch_id = b.id
+                    WHERE ${pbCond}
+                    UNION ALL
+                    SELECT oe.amount AS total_cost FROM operation_expenses oe
+                    JOIN production_batches pb ON oe.production_batch_id = pb.id
+                    JOIN batches b ON pb.batch_id = b.id
+                    WHERE ${pbCond}
+                ) all_costs
+            ),
+            vendor_counts AS (
+                SELECT COUNT(DISTINCT vendor_id) AS active_vendors
+                FROM purchase_orders po
+                WHERE ${poCond}
+            )
+            SELECT
+                (SELECT total_production FROM current_production) AS total_production,
+                (SELECT efficiency FROM current_production) AS industrial_efficiency,
+                COALESCE((SELECT total_expenditure FROM current_expenditures), 0) AS total_expenditures,
+                (SELECT active_vendors FROM vendor_counts) AS active_vendors;
+        `;
+
+        const [currentKPI, prevKPI] = await Promise.all([
+            client.query(buildKPIQuery(dateConditionPB, dateConditionPO)),
+            client.query(buildKPIQuery(prevDateConditionPB, prevDateConditionPO))
+        ]);
+
+        const current = currentKPI.rows[0] || {};
+        const prev = prevKPI.rows[0] || {};
+
+        const calcPercent = (curr, prev) => (!prev || prev === 0 ? 0 : Number((((curr - prev) / prev) * 100).toFixed(2)));
+
+        const kpi_percentage = {
+            total_production: calcPercent(Number(current.total_production), Number(prev.total_production)),
+            industrial_efficiency: calcPercent(Number(current.industrial_efficiency), Number(prev.industrial_efficiency)),
+            total_expenditures: calcPercent(Number(current.total_expenditures), Number(prev.total_expenditures)),
+            active_vendors: calcPercent(Number(current.active_vendors), Number(prev.active_vendors))
+        };
+
+        // 📦 3️⃣ Production Value by Product
+        const productValueQuery = `
+            SELECT
+                p.product_name,
+                SUM(
+                    COALESCE(raw_material_costs.total, 0) +
+                    COALESCE(batch_expense_costs.total, 0) +
+                    COALESCE(operation_expense_costs.total, 0)
+                ) AS total_production_value
+            FROM products p
+            JOIN production_batches pb ON p.id = pb.product_id
+            JOIN batches b ON pb.batch_id = b.id
+            LEFT JOIN (
+                SELECT production_batch_id, SUM(total_cost) AS total
+                FROM batch_raw_material_consumptions
+                GROUP BY production_batch_id
+            ) raw_material_costs ON pb.id = raw_material_costs.production_batch_id
+            LEFT JOIN (
+                SELECT production_batch_id, SUM(total_cost) AS total
+                FROM batch_expenses
+                GROUP BY production_batch_id
+            ) batch_expense_costs ON pb.id = batch_expense_costs.production_batch_id
+            LEFT JOIN (
+                SELECT production_batch_id, SUM(amount) AS total
+                FROM operation_expenses
+                GROUP BY production_batch_id
+            ) operation_expense_costs ON pb.id = operation_expense_costs.production_batch_id
+            WHERE ${dateConditionPB}
+            GROUP BY p.product_name
+            ORDER BY total_production_value DESC;
+        `;
+        const productValueResult = await client.query(productValueQuery);
+
+        // 💰 4️⃣ Expenditure Breakdown
+        const expenditureBreakdownQuery = `
+            SELECT 'Raw Materials' AS category, COALESCE(SUM(brmc.total_cost), 0) AS total_amount
+            FROM batch_raw_material_consumptions brmc
+            JOIN production_batches pb ON brmc.production_batch_id = pb.id
+            JOIN batches b ON pb.batch_id = b.id
+            WHERE ${dateConditionPB}
+
+            UNION ALL
+
+            SELECT 'Production Costs' AS category, COALESCE(SUM(be.total_cost), 0) AS total_amount
+            FROM batch_expenses be
+            JOIN production_batches pb ON be.production_batch_id = pb.id
+            JOIN batches b ON pb.batch_id = b.id
+            WHERE ${dateConditionPB}
+
+            UNION ALL
+
+            SELECT 'Operations' AS category, COALESCE(SUM(oe.amount), 0) AS total_amount
+            FROM operation_expenses oe
+            JOIN production_batches pb ON oe.production_batch_id = pb.id
+            JOIN batches b ON pb.batch_id = b.id
+            WHERE ${dateConditionPB}
+
+            UNION ALL
+
+            SELECT 'Procurement' AS category, COALESCE(SUM(total_amount), 0) AS total_amount
+            FROM purchase_orders po
+            WHERE ${dateConditionPO};
+        `;
+        const expenditureResult = await client.query(expenditureBreakdownQuery);
+
+        // ✅ 5️⃣ Final Response
+        return {
+            status: true,
+            message: `Report and analytics fetched successfully for filter: ${filter}`,
+            data: {
+                kpis: { ...current, kpi_percentage },
+                productValues: productValueResult.rows,
+                expenditureBreakdown: expenditureResult.rows
+            }
+        };
+
+    } catch (error) {
+        console.error('Error in reportAndAnalytics:', error);
+        return { status: false, message: `Something went wrong (${error.message})` };
+    } finally {
+        client.release();
+    }
+};
+
+exports.reportAndAnalytics = async ({ filter = 'current_month', startDate = null, endDate = null }) => {
+    const client = await pool.connect();
+    try {
+        // 🧭 1️⃣ Define time filters dynamically
+        let dateConditionPB = '';
+        let dateConditionPO = '';
+        let prevDateConditionPB = '';
+        let prevDateConditionPO = '';
+
+        if (filter === 'custom' && startDate && endDate) {
+            dateConditionPB = `pb.created_at BETWEEN '${startDate}' AND '${endDate}'`;
+            dateConditionPO = `po.order_date BETWEEN '${startDate}' AND '${endDate}'`;
+
+            const prevStart = `date '${startDate}' - (date '${endDate}' - date '${startDate}') - interval '1 day'`;
+            const prevEnd = `date '${startDate}' - interval '1 day'`;
+            prevDateConditionPB = `pb.created_at BETWEEN ${prevStart} AND ${prevEnd}`;
+            prevDateConditionPO = `po.order_date BETWEEN ${prevStart} AND ${prevEnd}`;
+        } else {
+            switch (filter) {
+                case 'last_month':
+                    dateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now() - interval '1 month')
+                        AND (date_trunc('month', now()) - interval '1 day')
+                    `;
+                    dateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now() - interval '1 month')
+                        AND (date_trunc('month', now()) - interval '1 day')
+                    `;
+                    prevDateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now() - interval '2 month')
+                        AND (date_trunc('month', now() - interval '1 month') - interval '1 day')
+                    `;
+                    prevDateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now() - interval '2 month')
+                        AND (date_trunc('month', now() - interval '1 month') - interval '1 day')
+                    `;
+                    break;
+
+                case 'last_3_months':
+                    dateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now() - interval '3 month')
+                        AND (date_trunc('month', now()) + interval '1 month' - interval '1 day')
+                    `;
+                    dateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now() - interval '3 month')
+                        AND (date_trunc('month', now()) + interval '1 month' - interval '1 day')
+                    `;
+                    prevDateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now() - interval '6 month')
+                        AND (date_trunc('month', now() - interval '3 month') - interval '1 day')
+                    `;
+                    prevDateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now() - interval '6 month')
+                        AND (date_trunc('month', now() - interval '3 month') - interval '1 day')
+                    `;
+                    break;
+
+                case 'current_year':
+                    dateConditionPB = `EXTRACT(YEAR FROM pb.created_at) = EXTRACT(YEAR FROM now())`;
+                    dateConditionPO = `EXTRACT(YEAR FROM po.order_date) = EXTRACT(YEAR FROM now())`;
+                    prevDateConditionPB = `EXTRACT(YEAR FROM pb.created_at) = EXTRACT(YEAR FROM now()) - 1`;
+                    prevDateConditionPO = `EXTRACT(YEAR FROM po.order_date) = EXTRACT(YEAR FROM now()) - 1`;
+                    break;
+
+                default: // current_month
+                    dateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now())
+                        AND (date_trunc('month', now()) + interval '1 month' - interval '1 day')
+                    `;
+                    dateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now())
+                        AND (date_trunc('month', now()) + interval '1 month' - interval '1 day')
+                    `;
+                    prevDateConditionPB = `
+                        pb.created_at BETWEEN
+                        date_trunc('month', now() - interval '1 month')
+                        AND (date_trunc('month', now()) - interval '1 day')
+                    `;
+                    prevDateConditionPO = `
+                        po.order_date BETWEEN
+                        date_trunc('month', now() - interval '1 month')
+                        AND (date_trunc('month', now()) - interval '1 day')
+                    `;
+            }
+        }
+
+        // 🧾 2️⃣ KPI Query (Current & Previous)
+        const buildKPIQuery = (pbCond, poCond) => `
+            WITH current_production AS (
+                SELECT
+                    COALESCE(SUM(pb.produced_qty), 0) AS total_production,
+                    COALESCE(SUM(pb.produced_qty) / NULLIF(SUM(pb.planned_qty), 0), 0) AS efficiency
+                FROM production_batches pb
+                JOIN batches b ON pb.batch_id = b.id
+                WHERE ${pbCond} AND b.status != 'rejected'
+            ),
+            current_expenditures AS (
+                SELECT SUM(total_cost) AS total_expenditure FROM (
+                    SELECT brmc.total_cost FROM batch_raw_material_consumptions brmc
+                    JOIN production_batches pb ON brmc.production_batch_id = pb.id
+                    JOIN batches b ON pb.batch_id = b.id
+                    WHERE ${pbCond} AND b.status != 'rejected'
+                    UNION ALL
+                    SELECT be.total_cost FROM batch_expenses be
+                    JOIN production_batches pb ON be.production_batch_id = pb.id
+                    JOIN batches b ON pb.batch_id = b.id
+                    WHERE ${pbCond} AND b.status != 'rejected'
+                    UNION ALL
+                    SELECT oe.amount AS total_cost FROM operation_expenses oe
+                    JOIN production_batches pb ON oe.production_batch_id = pb.id
+                    JOIN batches b ON pb.batch_id = b.id
+                    WHERE ${pbCond} AND b.status != 'rejected'
+                ) all_costs
+            ),
+            vendor_counts AS (
+                SELECT COUNT(DISTINCT vendor_id) AS active_vendors
+                FROM purchase_orders po
+                WHERE ${poCond}
+            )
+            SELECT
+                (SELECT total_production FROM current_production) AS total_production,
+                (SELECT efficiency FROM current_production) AS industrial_efficiency,
+                COALESCE((SELECT total_expenditure FROM current_expenditures), 0) AS total_expenditures,
+                (SELECT active_vendors FROM vendor_counts) AS active_vendors;
+        `;
+
+        const [currentKPI, prevKPI] = await Promise.all([
+            client.query(buildKPIQuery(dateConditionPB, dateConditionPO)),
+            client.query(buildKPIQuery(prevDateConditionPB, prevDateConditionPO))
+        ]);
+
+        const total_production_qty = await client.query(`SELECT COUNT(*) AS total_production
+FROM production_batches pb
+JOIN batches b ON pb.batch_id = b.id
+WHERE b.status != 'rejected'`)
+        const current = currentKPI.rows[0] || {};
+        const prev = prevKPI.rows[0] || {};
+
+        const calcPercent = (curr, prev) => (!prev || prev === 0 ? 0 : Number((((curr - prev) / prev) * 100).toFixed(2)));
+
+        const kpi_percentage = {
+            total_production: calcPercent(Number(current.total_production), Number(prev.total_production)),
+            industrial_efficiency: calcPercent(Number(current.industrial_efficiency), Number(prev.industrial_efficiency)),
+            total_expenditures: calcPercent(Number(current.total_expenditures), Number(prev.total_expenditures)),
+            active_vendors: calcPercent(Number(current.active_vendors), Number(prev.active_vendors))
+        };
+
+        // 📦 3️⃣ Production Value by Product
+        const productValueQuery = `
+            SELECT
+                p.product_name,
+                SUM(
+                    COALESCE(raw_material_costs.total, 0) +
+                    COALESCE(batch_expense_costs.total, 0) +
+                    COALESCE(operation_expense_costs.total, 0)
+                ) AS total_production_value
+            FROM products p
+            JOIN production_batches pb ON p.id = pb.product_id
+            JOIN batches b ON pb.batch_id = b.id
+            LEFT JOIN (
+                SELECT production_batch_id, SUM(total_cost) AS total
+                FROM batch_raw_material_consumptions
+                GROUP BY production_batch_id
+            ) raw_material_costs ON pb.id = raw_material_costs.production_batch_id
+            LEFT JOIN (
+                SELECT production_batch_id, SUM(total_cost) AS total
+                FROM batch_expenses
+                GROUP BY production_batch_id
+            ) batch_expense_costs ON pb.id = batch_expense_costs.production_batch_id
+            LEFT JOIN (
+                SELECT production_batch_id, SUM(amount) AS total
+                FROM operation_expenses
+                GROUP BY production_batch_id
+            ) operation_expense_costs ON pb.id = operation_expense_costs.production_batch_id
+            WHERE ${dateConditionPB} AND b.status != 'rejected'
+            GROUP BY p.product_name
+            ORDER BY total_production_value DESC;
+        `;
+        const productValueResult = await client.query(productValueQuery);
+
+        // 💰 4️⃣ Expenditure Breakdown
+        const expenditureBreakdownQuery = `
+            SELECT 'Raw Materials' AS category, COALESCE(SUM(brmc.total_cost), 0) AS total_amount
+            FROM batch_raw_material_consumptions brmc
+            JOIN production_batches pb ON brmc.production_batch_id = pb.id
+            JOIN batches b ON pb.batch_id = b.id
+            WHERE ${dateConditionPB} AND b.status != 'rejected'
+
+            UNION ALL
+
+            SELECT 'Production Costs' AS category, COALESCE(SUM(be.total_cost), 0) AS total_amount
+            FROM batch_expenses be
+            JOIN production_batches pb ON be.production_batch_id = pb.id
+            JOIN batches b ON pb.batch_id = b.id
+            WHERE ${dateConditionPB} AND b.status != 'rejected'
+
+            UNION ALL
+
+            SELECT 'Operations' AS category, COALESCE(SUM(oe.amount), 0) AS total_amount
+            FROM operation_expenses oe
+            JOIN production_batches pb ON oe.production_batch_id = pb.id
+            JOIN batches b ON pb.batch_id = b.id
+            WHERE ${dateConditionPB} AND b.status != 'rejected'
+
+            UNION ALL
+
+            SELECT 'Procurement' AS category, COALESCE(SUM(total_amount), 0) AS total_amount
+            FROM purchase_orders po
+            WHERE ${dateConditionPO};
+        `;
+        const expenditureResult = await client.query(expenditureBreakdownQuery);
+
+        // ✅ 5️⃣ Final Response
+        current.total_production = total_production_qty.rows[0].total_production
+        return {
+            status: true,
+            message: `Report and analytics fetched successfully for filter: ${filter}`,
+            data: {
+                kpis: { ...current, kpi_percentage },
+                productValues: productValueResult.rows,
+                expenditureBreakdown: expenditureResult.rows
+            }
+        };
+
+    } catch (error) {
+        console.error('Error in reportAndAnalytics:', error);
+        return { status: false, message: `Something went wrong (${error.message})` };
+    } finally {
+        client.release();
+    }
+};
 
 // expenditure.services.js
 // filter query =(current_month,last_3_months,last_3_months,current_year ,startDate=,endDate=)
@@ -1044,7 +1772,7 @@ exports.generateInventoryReportService = async (params = {}) => {
 // sorting params =(current_month,last_month,last_3_months,last_3_months,current_year ,startDate=,endDate=)
 // endpoint  http://localhost:5000/api/expenditure/vendor-report
 // Suggested function name: generateVendorPerformanceReport
-exports.generateVendorPerformanceReport = async (params = {}) => {
+exports.generateVendorPerformanceReport1 = async (params = {}) => {
     const client = await pool.connect();
     try {
         const { filter = 'current_month', startDate, endDate, format = 'json' } = params;
@@ -1104,6 +1832,7 @@ exports.generateVendorPerformanceReport = async (params = {}) => {
             ORDER BY v.name;
         `;
 
+
         const { rows } = await client.query(query);
 
         // Transform
@@ -1146,6 +1875,104 @@ exports.generateVendorPerformanceReport = async (params = {}) => {
         client.release();
     }
 };
+
+exports.generateVendorPerformanceReport = async (params = {}) => {
+    const client = await pool.connect();
+    try {
+        const { filter = 'current_month', startDate, endDate, format = 'json' } = params;
+
+        let fromDate = null, toDate = null;
+        const now = new Date();
+
+        if (startDate && endDate) {
+            const parseDate = (d) => {
+                const [day, month, year] = d.split('-');
+                return new Date(`${year}-${month}-${day}`);
+            };
+            fromDate = parseDate(startDate); fromDate.setHours(0, 0, 0, 0);
+            toDate = parseDate(endDate); toDate.setHours(23, 59, 59, 999);
+        } else {
+            switch (filter) {
+                case 'last_month':
+                    fromDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    toDate = new Date(now.getFullYear(), now.getMonth(), 0);
+                    break;
+                case 'last_3_months':
+                    fromDate = new Date(now); fromDate.setMonth(fromDate.getMonth() - 3);
+                    toDate = now;
+                    break;
+                case 'current_year':
+                    fromDate = new Date(now.getFullYear(), 0, 1);
+                    toDate = now;
+                    break;
+                case 'current_month':
+                default:
+                    fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    toDate = now;
+            }
+        }
+
+        const fromDateStr = fromDate.toISOString();
+        const toDateStr = toDate.toISOString();
+
+
+        const query = `SELECT
+    v.id AS vendor_id,
+    v.name AS vendor_name,
+    v.contact_email,
+    v.phone,
+    COUNT(po.id) AS total_orders,
+    COALESCE(SUM(po.total_amount::numeric), 0) AS total_spent,
+    SUM(CASE WHEN po.status NOT IN ('received','shipped') THEN 1 ELSE 0 END) AS pending_orders
+FROM vendors v
+LEFT JOIN purchase_orders po
+    ON po.vendor_id = v.id
+    AND po.order_date >= '2025-10-01T00:00:00.000Z' -- example start date
+    AND po.order_date <= '2025-10-31T23:59:59.999Z' -- example end date
+GROUP BY v.id, v.name, v.contact_email, v.phone
+ORDER BY v.name`
+
+        const { rows } = await client.query(query);
+
+        const reportData = rows.map(row => ({
+            VendorID: row.vendor_id,
+            VendorName: row.vendor_name,
+            ContactEmail: row.contact_email,
+            Phone: row.phone,
+            TotalOrders: parseInt(row.total_orders),
+            TotalSpent: parseFloat(row.total_spent).toFixed(2),
+            PendingOrders: parseInt(row.pending_orders)
+        }));
+
+        if (format === 'csv') {
+            const fields = [
+                { label: 'Vendor ID', value: 'VendorID' },
+                { label: 'Vendor Name', value: 'VendorName' },
+                { label: 'Contact Email', value: 'ContactEmail' },
+                { label: 'Phone', value: 'Phone' },
+                { label: 'Total Orders', value: 'TotalOrders' },
+                { label: 'Total Spent', value: 'TotalSpent' },
+                { label: 'Pending Orders', value: 'PendingOrders' }
+            ];
+            const parser = new Parser({ fields });
+            const csv = parser.parse(reportData);
+            return { status: true, format: 'csv', csv, filename: 'vendor_performance_report.csv' };
+        }
+
+        const headers = ['VendorID', 'VendorName', 'ContactEmail', 'Phone', 'TotalOrders', 'TotalSpent', 'PendingOrders'];
+        return { status: true, format: 'json', headers, data: reportData };
+
+    } catch (error) {
+        console.error(error);
+        return { status: false, message: `Something went wrong (${error.message})` };
+    } finally {
+        client.release();
+    }
+};
+
+
+
+
 
 // sorting params =(current_month,last_month,last_3_months,last_3_months,current_year ,startDate=,endDate=)
 // endpoint  http://localhost:5000/api/expenditure/quality-control-report

@@ -3,9 +3,9 @@ const cors = require('cors')
 const errorMiddleare = require('./middleware/error')
 const path = require('path')
 const morgan = require('morgan');
-const logger = require("./utils/logger");
 const app = express()
 
+app.use('/uploads', express.static(path.join(__dirname,'..', 'uploads')));
 // Set EJS as template engine
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -13,7 +13,6 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(morgan('dev'));
 app.use(express.json())
 app.use(cors());
-
 //routes
 const indexRoutes = require('./routes/index')
 const authRoutes = require("./routes/auth.route")
@@ -29,6 +28,8 @@ const expenditureRoutes = require('./routes/expenditure.route')
 const productRoutes = require('./routes/product.route')
 const batchRoutes = require('./routes/batch.route')
 const historyRoutes = require('./routes/history.routes')
+const dashboardRoutes = require('./routes/dashboard.route')
+const fileUploadRoutes = require('./routes/fileUpload.route')
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -47,6 +48,7 @@ app.use("/api/expenditure",expenditureRoutes)
 app.use("/api/product",productRoutes)
 app.use("/api/batch",batchRoutes)
 app.use("/api/logs",historyRoutes)
+app.use("/api/upload",fileUploadRoutes)
 
 //error middleware
 app.use(errorMiddleare);

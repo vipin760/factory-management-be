@@ -1,19 +1,32 @@
+const { pool } = require("../config/database");
 const { sqlQueryFun } = require("../database/sql/sqlFunction");
+const { createAuditLog } = require("./auditlog.services");
 
 exports.createBatchService = async (body, userId) => {
+    const client = await pool.connect()
     try {
         const { batch_no, product_id, start_date, end_date, status, notes } = body;
+        await client.query("BEGIN")
         if (!userId) return { status: false, message: "User ID is required." };
         if (!batch_no) return { status: false, message: "Batch number is required." };
         const product_exist = await sqlQueryFun(`SELECT * FROM products WHERE id = $1`, [product_id])
-        if (!product_exist.length) return { status: false, message: "product could not find" }
+        if (!product_exist.length) {
+            await client.query("ROLLBACK")
+            return { status: false, message: "Product not found. Please verify if the product already exists" }
+        }
 
         const batch_exist = await sqlQueryFun(`SELECT * FROM batches WHERE batch_no = $1`, [batch_no])
-        if (batch_exist.length) return { status: false, message: `Batch number ${batch_no} already exist` }
-        
-        
+        if (batch_exist.length) {
+            await client.query("ROLLBACK")
+            return { status: false, message: `Batch number ${batch_no} already exist` }
+        }
+
+
         const productUsed = await sqlQueryFun(`SELECT * FROM batches WHERE product_id = $1`, [product_id]);
-        if (productUsed.length) return { status: false, message: "This product is already assigned to another batch. Cannot create batch." };
+        if (productUsed.length) {
+            await client.query("ROLLBACK")
+            return { status: false, message: "This product is already assigned to another batch. Cannot create batch." };
+        }
 
         if (start_date && isNaN(Date.parse(start_date))) {
             return { status: false, message: "Invalid start_date format." };
@@ -32,6 +45,7 @@ exports.createBatchService = async (body, userId) => {
         const checkQuery = `SELECT 1 FROM batches WHERE batch_no = $1`;
         const existing = await sqlQueryFun(checkQuery, [batch_no]);
         if (existing > 0) {
+            await client.query("ROLLBACK")
             return { status: false, message: `Batch number '${batch_no}' already exists.` };
         }
 
@@ -51,13 +65,36 @@ exports.createBatchService = async (body, userId) => {
             notes || null,
         ]);
 
+        console.log("<><>result[0].id", result[0].id)
+        console.log("<><>result[0].batch_no", result[0].batch_no)
+        console.log("<><>product_exist[0].product_name", product_exist[0].product_name)
+        console.log("<><>userId", userId)
+
+        const logData = await createAuditLog(client, {
+            entityType: 'batches',
+            entityId: result[0].id,
+            action: 'create',
+            userId,
+            details: {
+                product_name: result[0].batch_no,
+                product_code: product_exist[0].product_name
+            },
+            status: 'success',
+            metadata: { message: `Batch No ${result[0].batch_no} created successfully` }
+        });
+        console.log("<><>logData", logData)
+        await client.query("COMMIT");
         return {
             status: true,
             message: "Batch created successfully.",
             data: result[0],
         };
     } catch (error) {
+        console.log("<><>error", error)
+        await client.query("ROLLBACK")
         return { status: false, message: `Something went wrong (${error.message})` };
+    } finally {
+        client.release();
     }
 };
 
@@ -165,6 +202,7 @@ exports.getAllBatchService = async (queryParams) => {
 };
 
 exports.updateBatchService = async (id, body) => {
+     const client = await pool.connect()
     try {
         const { batch_no, product_id, start_date, end_date, status, notes } = body;
         if (!id) return { status: false, message: "Batch ID is required." };
@@ -216,6 +254,18 @@ exports.updateBatchService = async (id, body) => {
 
         if (!result.length) return { status: false, message: "Batch not found." };
 
+           await createAuditLog(client, {
+              entityType: 'batches',
+              entityId: result[0].id,
+              action: 'update',
+              userId,
+              details: {
+                product_name: result[0].batch_no,
+                product_code: "There is no product"
+              },
+              status: 'success',
+              metadata: { message: `Batch No ${result[0].batch_no} updated successfully` }
+            });
         return {
             status: true,
             data: result[0],
@@ -226,18 +276,30 @@ exports.updateBatchService = async (id, body) => {
     }
 };
 
-exports.deleteBatchService = async (id) => {
+exports.deleteBatchService = async (id,userId) => {
+    const client = await pool.connect()
     try {
         const query = `DELETE FROM batches WHERE id = $1 RETURNING *`;
         const result = await sqlQueryFun(query, [id]);
-        if (!result.length) return { status: false, message: "Batch not found." } 
+        if (!result.length) return { status: false, message: "Batch not found." }
+         await createAuditLog(client, {
+            entityType: 'batches',
+            entityId: result[0].id,
+            action: 'delete',
+            userId,
+            details: {
+                product_name: result[0].batch_no,
+                product_code: "There is no product"
+            },
+            status: 'success',
+            metadata: { message: `Batch No ${result[0].batch_no} created successfully` }
+        });
         return {
             status: true,
             data: result,
             message: "Batch deleted successfully.",
         };
     } catch (error) {
-        console.log("<><>error",error.message)
         return { status: false, message: `Something went wrong (${error.message})` };
     }
 };

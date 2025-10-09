@@ -164,15 +164,17 @@ CREATE TABLE IF NOT EXISTS batch_raw_material_consumptions (
 );
 
   -- Audit logs table
-  CREATE TABLE IF NOT EXISTS audit_logs (
+ CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    entity_type TEXT NOT NULL,
+    entity_type TEXT NOT NULL,              -- e.g., 'indent', 'batch', 'stock', 'order'
     entity_id UUID NOT NULL,
-    action TEXT NOT NULL,
+    action TEXT NOT NULL,                   -- e.g., 'create', 'update', 'approve', 'complete'
     user_id UUID REFERENCES users(id),
     timestamp TIMESTAMP DEFAULT now(),
-    details JSONB
-  );
+    details JSONB,                          -- store extra data like old/new values
+    status TEXT,                            -- optional: for actions with states (e.g., pending, completed)
+    metadata JSONB                          -- optional: store extra useful info for analytics
+);
 
   -- Operation expenses table linked to production batches
  CREATE TABLE IF NOT EXISTS operation_expenses (
@@ -196,6 +198,19 @@ CREATE TABLE IF NOT EXISTS batch_raw_material_consumptions (
     reference_id UUID,             
     created_at TIMESTAMP DEFAULT now()
   );
+
+  CREATE TABLE IF NOT EXISTS purchase_order_files (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    purchase_order_id UUID REFERENCES purchase_orders(id) ON DELETE CASCADE NOT NULL,
+    uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    file_url TEXT NOT NULL,           -- URL/path to file (S3, server, etc.)
+    file_type TEXT,                   -- MIME type or extension (e.g., image/png, pdf)
+    remarks TEXT,                     -- Optional notes about the file
+    verified_by UUID REFERENCES users(id), -- Admin who verifies
+    verified_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT now(),
+    updated_at TIMESTAMP DEFAULT now()
+);
 
 `);
 

@@ -110,7 +110,7 @@ exports.getAllGrnService = async (query) => {
     }
 
     // Query to fetch GRNs with purchase order and vendor info
-    const queryStr = `
+    const queryStr1 = `
       SELECT
         g.id AS grn_id,
         g.grn_no,
@@ -137,6 +137,47 @@ exports.getAllGrnService = async (query) => {
       ORDER BY ${sortBy} ${sortOrder}
       ${paginationClause}
     `;
+
+    const queryStr = `
+  SELECT
+    g.id AS grn_id,
+    g.grn_no,
+    g.received_at,
+    g.notes,
+    g.gate_pass_number,
+    g.received_by,
+    po.id AS purchase_order_id,
+    po.purchase_order_id,
+    po.status AS purchase_order_status,
+    po.total_amount AS purchase_order_total,
+    v.id AS vendor_id,
+    v.name AS vendor_name,
+    v.contact_email AS vendor_email,
+    v.phone AS vendor_phone,
+    v.gstin AS vendor_gstin,
+    v.address AS vendor_address,
+    u.name AS received_by_name,
+    json_agg(
+      json_build_object(
+        'file_id', f.id,
+        'file_url', f.file_url
+      )
+    ) FILTER (WHERE f.id IS NOT NULL) AS uploaded_files
+  FROM grns g
+  JOIN purchase_orders po ON g.purchase_order_id = po.id
+  JOIN vendors v ON po.vendor_id = v.id
+  JOIN users u ON g.received_by = u.id
+  LEFT JOIN purchase_order_files f ON po.id = f.purchase_order_id
+  ${whereClause}
+  GROUP BY
+    g.id, g.grn_no, g.received_at, g.notes, g.gate_pass_number, g.received_by,
+    po.id, po.purchase_order_id, po.status, po.total_amount,
+    v.id, v.name, v.contact_email, v.phone, v.gstin, v.address,
+    u.name
+  ORDER BY ${sortBy} ${sortOrder}
+  ${paginationClause};
+`;
+
 
     const result = await sqlQueryFun(queryStr, values);
 
@@ -311,7 +352,6 @@ exports.updateGrnService = async (id, body, userId) => {
     client.release();
   }
 };
-
 
 exports.deleteGrnService = async (id) => {
   try {

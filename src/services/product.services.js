@@ -1,7 +1,10 @@
 const { sqlQueryFun } = require("../database/sql/sqlFunction");
 const { validate: isUuid } = require('uuid');
+const { createAuditLog } = require("./auditlog.services");
+const { pool } = require("../config/database");
 
 exports.createProductService = async (body, userId) => {
+  const client = await pool.connect()
   try {
     const { product_name, product_code, description } = body;
     if (!product_name) return { status: false, message: "Product name is required." };
@@ -27,8 +30,19 @@ exports.createProductService = async (body, userId) => {
     }
 
     const query = `INSERT INTO products (product_name, product_code, description) VALUES ($1, $2, $3) RETURNING *`;
+    
     const values = [product_name.toLowerCase(), product_code || null, description || null];
     const result = await sqlQueryFun(query, values);
+      
+    await createAuditLog(client, {
+      entityType: 'product',
+      entityId: result[0].id,
+      action: 'create',
+      userId,
+      details: { product_name, product_code },
+      status: 'success',
+      metadata: { message: 'Product created successfully' }
+    });
     return { status: true, data: result[0], message: "Product created successfully." };
   } catch (error) {
     return { status: false, message: `Something went wrong (${error.message})` };
@@ -94,7 +108,8 @@ exports.getAllProductsService = async (queryParams) => {
   }
 };
 
-exports.updateProductService = async (id, body) => {
+exports.updateProductService = async (id, body,userId) => {
+  const client = await pool.connect()
   try {
     const { product_name, product_code, description } = body;
     if (product_code) {
@@ -112,18 +127,45 @@ exports.updateProductService = async (id, body) => {
 
     if (!result.length) return { status: false, message: "Product not found." };
 
+     await createAuditLog(client, {
+      entityType: 'product',
+      entityId: result[0].id,
+      action: 'update',
+      userId,
+      details: {
+        product_name: result[0].product_name,
+        product_code: result[0].product_code
+      },
+      status: 'success',
+      metadata: { message: 'Product updated successfully' }
+    });
+
     return { status: true, data: result[0], message: "Product updated successfully." };
   } catch (error) {
     return { status: false, message: `Something went wrong (${error.message})` };
   }
 };
 
-exports.deleteProductService = async (id) => {
+exports.deleteProductService = async (id,userId) => {
+  const client = await pool.connect()
   try {
     const query = `DELETE FROM products WHERE id = $1 RETURNING *`;
     const result = await sqlQueryFun(query, [id]);
 
     if (!result.length) return { status: false, message: "Product not found." };
+
+      await createAuditLog(client, {
+      entityType: 'product',
+      entityId: result[0].id,
+      action: 'update',
+      userId,
+      details: {
+        product_name: result[0].product_name,
+        product_code: result[0].product_code
+      },
+      status: 'success',
+      metadata: { message: 'Product deleted successfully' }
+    });
 
     return { status: true,data:result[0], message: "Product deleted successfully." };
   } catch (error) {

@@ -16,13 +16,13 @@ exports.fetchproduct = catchAsync(async (req, res, next) => {
 })
 
 exports.deleteproduct = catchAsync(async (req, res, next) => {
-    const { status, data, message } = await productServices.deleteProductService(req.params.id);
+    const { status, data, message } = await productServices.deleteProductService(req.params.id,req.user.id);
     if (!status) return next(new ErrorHandler(message, 400));
     return res.status(200).send({ status, data, message })
 })
 
 exports.updateproduct = catchAsync(async (req, res, next) => {
-    const { status, data, message } = await productServices.updateProductService(req.params.id, req.body);
+    const { status, data, message } = await productServices.updateProductService(req.params.id, req.body,req.user.id);
     if (!status) return next(new ErrorHandler(message, 400));
     return res.status(200).send({ status, data, message })
 })

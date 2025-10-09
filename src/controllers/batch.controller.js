@@ -16,7 +16,7 @@ exports.getAllbatch = catchAsync( async(req ,res ,next)=>{
 })
 
 exports.deletebatch = catchAsync( async(req ,res ,next)=>{
-    const {status, data, message} = await batchServices.deleteBatchService(req.params.id);
+    const {status, data, message} = await batchServices.deleteBatchService(req.params.id,req.user.id);
     if(!status) return next(new ErrorHandler(message,400));
     return res.status(200).send({status,data,message})
 })
