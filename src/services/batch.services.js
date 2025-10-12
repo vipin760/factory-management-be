@@ -201,7 +201,7 @@ exports.getAllBatchService = async (queryParams) => {
     }
 };
 
-exports.updateBatchService = async (id, body) => {
+exports.updateBatchService = async (id, body,userId) => {
      const client = await pool.connect()
     try {
         const { batch_no, product_id, start_date, end_date, status, notes } = body;

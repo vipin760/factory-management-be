@@ -82,7 +82,7 @@ exports.createIndentService = async (body, userId) => {
   }
 };
 
-exports.getAllIndentService = async (queryParams) => {
+exports.getAllIndentService2 = async (queryParams) => {
   try {
     let { page, limit, sortBy, sortOrder } = queryParams;
     page = parseInt(page) || 1;
@@ -144,6 +144,103 @@ exports.getAllIndentService = async (queryParams) => {
       message: 'Indents fetched successfully',
     };
   } catch (error) {
+    return {
+      status: false,
+      data: [],
+      message: error.message || 'Something went wrong while fetching indents',
+    };
+  }
+};
+exports.getAllIndentService = async (queryParams) => {
+  try {
+    let { page, limit, sortBy, sortOrder, search, status, priority } = queryParams;
+
+    page = parseInt(page) || 1;
+    limit = limit ? parseInt(limit) : null;
+    sortBy = sortBy || 'i.created_at';
+    sortOrder = sortOrder?.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+    search = search ? search.trim() : '';
+
+    // ✅ Base Query
+    let baseQuery = `
+      SELECT 
+        i.*,
+        u.name AS requested_by_name,
+        -- ✅ Purchase Order Details if any
+        json_build_object(
+          'id', po.id,
+          'purchase_order_id', po.purchase_order_id,
+          'vendor_id', po.vendor_id,
+          'status', po.status,
+          'total_amount', po.total_amount,
+          'order_date', po.order_date,
+          'expected_delivery', po.expected_delivery
+        ) AS purchase_order
+      FROM indents i
+      LEFT JOIN users u ON u.id = i.requested_by
+      LEFT JOIN purchase_orders po ON po.indent_id = i.id
+    `;
+
+    // ✅ Dynamic filters
+    let conditions = [];
+    if (search) {
+      conditions.push(`
+        (LOWER(i.indent_no) LIKE LOWER('%${search}%') OR
+         LOWER(u.name) LIKE LOWER('%${search}%'))
+      `);
+    }
+    if (status) {
+      conditions.push(`i.status = '${status}'`);
+    }
+    if (priority) {
+      conditions.push(`i.priority = '${priority}'`);
+    }
+
+    if (conditions.length > 0) {
+      baseQuery += ` WHERE ${conditions.join(' AND ')} `;
+    }
+
+    // ✅ Grouping & Sorting
+    baseQuery += `
+      GROUP BY i.id, u.name, po.id
+      ORDER BY ${sortBy} ${sortOrder}
+    `;
+
+    // ✅ Pagination
+    if (limit) {
+      const offset = (page - 1) * limit;
+      baseQuery += ` LIMIT ${limit} OFFSET ${offset}`;
+    }
+
+    baseQuery += ';';
+
+    const indents = await sqlQueryFun(baseQuery, []);
+
+    // ✅ Total count for pagination
+    let countQuery = `
+      SELECT COUNT(*) AS total FROM indents i
+      LEFT JOIN users u ON u.id = i.requested_by
+    `;
+    if (conditions.length > 0) {
+      countQuery += ` WHERE ${conditions.join(' AND ')} `;
+    }
+
+    const countResult = await sqlQueryFun(countQuery, []);
+    const total = parseInt(countResult[0]?.total || 0);
+
+    return {
+      status: true,
+      data: {
+        indents,
+        total,
+        page,
+        limit: limit || total,
+        totalPages: limit ? Math.ceil(total / limit) : 1,
+      },
+      message: 'Indents fetched successfully',
+    };
+  } catch (error) {
+    console.error('getAllIndentService error:', error);
     return {
       status: false,
       data: [],
