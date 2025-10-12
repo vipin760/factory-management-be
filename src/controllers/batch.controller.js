@@ -22,7 +22,7 @@ exports.deletebatch = catchAsync( async(req ,res ,next)=>{
 })
 
 exports.updatebatch = catchAsync( async(req ,res ,next)=>{
-    const {status, data, message} = await batchServices.updateBatchService(req.params.id,req.body);
+    const {status, data, message} = await batchServices.updateBatchService(req.params.id,req.body,req.user.id);
     if(!status) return next(new ErrorHandler(message,400));
     return res.status(200).send({status,data,message})
 })
