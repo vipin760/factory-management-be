@@ -22,11 +22,11 @@ exports.createBatchService = async (body, userId) => {
         }
 
 
-        const productUsed = await sqlQueryFun(`SELECT * FROM batches WHERE product_id = $1`, [product_id]);
-        if (productUsed.length) {
-            await client.query("ROLLBACK")
-            return { status: false, message: "This product is already assigned to another batch. Cannot create batch." };
-        }
+        // const productUsed = await sqlQueryFun(`SELECT * FROM batches WHERE product_id = $1`, [product_id]);
+        // if (productUsed.length) {
+        //     await client.query("ROLLBACK")
+        //     return { status: false, message: "This product is already assigned to another batch. Cannot create batch." };
+        // }
 
         if (start_date && isNaN(Date.parse(start_date))) {
             return { status: false, message: "Invalid start_date format." };
@@ -64,11 +64,6 @@ exports.createBatchService = async (body, userId) => {
             status || "planned",
             notes || null,
         ]);
-
-        console.log("<><>result[0].id", result[0].id)
-        console.log("<><>result[0].batch_no", result[0].batch_no)
-        console.log("<><>product_exist[0].product_name", product_exist[0].product_name)
-        console.log("<><>userId", userId)
 
         const logData = await createAuditLog(client, {
             entityType: 'batches',
