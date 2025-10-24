@@ -12,7 +12,8 @@ exports.createUnitMaster = async (userId, body) => {
         await client.query('BEGIN');
         const { unit_name, department_name, purpose, shop_name, product_name, items } = body;
         const unit_nameExist = await client.query(`SELECT * FROM unit_master WHERE unit_name ILIKE $1`, [unit_name])
-        if (unit_nameExist.length) return { status: false, message: `Already exist ${unit_name} unit` }
+        console.log("<><>unit_nameExist", unit_nameExist)
+        if (unit_nameExist.rows.length) return { status: false, message: `Already exist ${unit_name} unit` }
 
         const insertMasterQuery = `
       INSERT INTO unit_master (unit_name, department_name, purpose, shop_name, product_name)
@@ -39,7 +40,7 @@ exports.createUnitMaster = async (userId, body) => {
         }
 
         const data = await client.query('COMMIT');
-        return { status: true,data, message: "Unit master created successfully" };
+        return { status: true, data, message: "Unit master created successfully" };
     } catch (error) {
         await client.query('ROLLBACK');
         return { status: false, message: `Something went wrong. (${error.message})` };
@@ -118,13 +119,17 @@ exports.getUnitMaster = async (query) => {
             unit.items = itemsResult.rows;
         }
 
-        // ✅ Final response
+        const result = {
+            status: true,
+            totalRecords,                    // total number of records matching the query
+            totalPages:limit === "all"? 1 : Math.ceil(totalRecords / parseInt(limit)) ,                       // total number of pages
+            currentPage: limit === "all" ? 1 : parseInt(page) || 1, // current page
+            limit: limit === "all" ? totalRecords : parseInt(limit), // actual limit applied                       // array of records
+        };
         return {
             status: true,
-            totalRecords,
-            totalPages: limit === "all" ? 1 : Math.ceil(totalRecords / parseInt(limit)),
-            currentPage: limit === "all" ? 1 : parseInt(page),
-            data: units,
+            data:{data: units  ,paginationData:result},
+            message: "total unit fetch successfully"
         };
     } catch (error) {
         await client.query('ROLLBACK');
@@ -164,136 +169,136 @@ exports.deleteUnitMaster = async (unit_id) => {
 };
 
 exports.updateUnitMaster = async (unit_id, body, userId) => {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const { unit_name, department_name, purpose, shop_name, product_name, items } = body;
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const { unit_name, department_name, purpose, shop_name, product_name, items } = body;
 
-    if (!unit_id) {
-      return { status: false, message: "Unit ID is required" };
-    }
+        if (!unit_id) {
+            return { status: false, message: "Unit ID is required" };
+        }
 
-    // 🔹 Check if unit exists
-    const existingUnit = await client.query(`SELECT * FROM unit_master WHERE id = $1`, [unit_id]);
-    if (existingUnit.rows.length === 0) {
-      return { status: false, message: "Unit master not found" };
-    }
+        // 🔹 Check if unit exists
+        const existingUnit = await client.query(`SELECT * FROM unit_master WHERE id = $1`, [unit_id]);
+        if (existingUnit.rows.length === 0) {
+            return { status: false, message: "Unit master not found" };
+        }
 
-    // 🔹 Build update query dynamically
-    const fields = { unit_name, department_name, purpose, shop_name, product_name };
-    const setClauses = [];
-    const values = [];
-    let idx = 1;
+        // 🔹 Build update query dynamically
+        const fields = { unit_name, department_name, purpose, shop_name, product_name };
+        const setClauses = [];
+        const values = [];
+        let idx = 1;
 
-    for (const [key, value] of Object.entries(fields)) {
-      if (value !== undefined && value !== null) {
-        setClauses.push(`${key} = $${idx}`);
-        values.push(value);
+        for (const [key, value] of Object.entries(fields)) {
+            if (value !== undefined && value !== null) {
+                setClauses.push(`${key} = $${idx}`);
+                values.push(value);
+                idx++;
+            }
+        }
+
+        // Add updated_by and updated_at
+        setClauses.push(`updated_by = $${idx}`);
+        values.push(userId);
         idx++;
-      }
-    }
 
-    // Add updated_by and updated_at
-    setClauses.push(`updated_by = $${idx}`);
-    values.push(userId);
-    idx++;
+        setClauses.push(`updated_at = now()`);
 
-    setClauses.push(`updated_at = now()`);
-
-    if (setClauses.length > 0) {
-      const updateQuery = `
+        if (setClauses.length > 0) {
+            const updateQuery = `
         UPDATE unit_master
         SET ${setClauses.join(", ")}
         WHERE id = $${idx}
       `;
-      values.push(unit_id);
-      await client.query(updateQuery, values);
-    }
+            values.push(unit_id);
+            await client.query(updateQuery, values);
+        }
 
-    // 🔹 Handle unit_master_items (if provided)
-    if (Array.isArray(items)) {
-      const existingItems = await client.query(
-        `SELECT id, raw_material_id FROM unit_master_items WHERE unit_master_id = $1`,
-        [unit_id]
-      );
+        // 🔹 Handle unit_master_items (if provided)
+        if (Array.isArray(items)) {
+            const existingItems = await client.query(
+                `SELECT id, raw_material_id FROM unit_master_items WHERE unit_master_id = $1`,
+                [unit_id]
+            );
 
-      const existingMap = new Map(existingItems.rows.map(item => [item.raw_material_id, item.id]));
-      const inputRawIds = items.map(i => i.raw_material_id);
+            const existingMap = new Map(existingItems.rows.map(item => [item.raw_material_id, item.id]));
+            const inputRawIds = items.map(i => i.raw_material_id);
 
-      for (const item of items) {
-        const value = (item.weight || 0) * (item.rate || 0); // auto-calculate
+            for (const item of items) {
+                const value = (item.weight || 0) * (item.rate || 0); // auto-calculate
 
-        if (!existingMap.has(item.raw_material_id)) {
-          // Insert new item
-          await client.query(
-            `INSERT INTO unit_master_items 
+                if (!existingMap.has(item.raw_material_id)) {
+                    // Insert new item
+                    await client.query(
+                        `INSERT INTO unit_master_items 
               (unit_master_id, raw_material_id, weight, unit, rate, value, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, now())`,
-            [unit_id, item.raw_material_id, item.weight || 0, item.unit || null, item.rate || 0, value]
-          );
-        } else {
-          // Dynamic update for provided fields
-          const updateItemFields = [];
-          const updateValues = [];
-          let j = 1;
+                        [unit_id, item.raw_material_id, item.weight || 0, item.unit || null, item.rate || 0, value]
+                    );
+                } else {
+                    // Dynamic update for provided fields
+                    const updateItemFields = [];
+                    const updateValues = [];
+                    let j = 1;
 
-          if (item.weight !== undefined) {
-            updateItemFields.push(`weight = $${j++}`);
-            updateValues.push(item.weight);
-          }
-          if (item.unit !== undefined) {
-            updateItemFields.push(`unit = $${j++}`);
-            updateValues.push(item.unit);
-          }
-          if (item.rate !== undefined) {
-            updateItemFields.push(`rate = $${j++}`);
-            updateValues.push(item.rate);
-          }
+                    if (item.weight !== undefined) {
+                        updateItemFields.push(`weight = $${j++}`);
+                        updateValues.push(item.weight);
+                    }
+                    if (item.unit !== undefined) {
+                        updateItemFields.push(`unit = $${j++}`);
+                        updateValues.push(item.unit);
+                    }
+                    if (item.rate !== undefined) {
+                        updateItemFields.push(`rate = $${j++}`);
+                        updateValues.push(item.rate);
+                    }
 
-          // always update value if weight/rate is changed
-          if (item.weight !== undefined || item.rate !== undefined) {
-            updateItemFields.push(`value = $${j++}`);
-            updateValues.push(value);
-          }
+                    // always update value if weight/rate is changed
+                    if (item.weight !== undefined || item.rate !== undefined) {
+                        updateItemFields.push(`value = $${j++}`);
+                        updateValues.push(value);
+                    }
 
-          // add updated_at timestamp
-          updateItemFields.push(`updated_at = now()`);
+                    // add updated_at timestamp
+                    updateItemFields.push(`updated_at = now()`);
 
-          if (updateItemFields.length > 0) {
-            const updateItemQuery = `
+                    if (updateItemFields.length > 0) {
+                        const updateItemQuery = `
               UPDATE unit_master_items
               SET ${updateItemFields.join(", ")}
               WHERE unit_master_id = $${j} AND raw_material_id = $${j + 1}
             `;
-            updateValues.push(unit_id, item.raw_material_id);
-            await client.query(updateItemQuery, updateValues);
-          }
-        }
-      }
+                        updateValues.push(unit_id, item.raw_material_id);
+                        await client.query(updateItemQuery, updateValues);
+                    }
+                }
+            }
 
-      // Delete items not in payload
-      const rawIdsToDelete = existingItems.rows
-        .filter(item => !inputRawIds.includes(item.raw_material_id))
-        .map(item => item.raw_material_id);
+            // Delete items not in payload
+            const rawIdsToDelete = existingItems.rows
+                .filter(item => !inputRawIds.includes(item.raw_material_id))
+                .map(item => item.raw_material_id);
 
-      if (rawIdsToDelete.length > 0) {
-        await client.query(
-          `DELETE FROM unit_master_items
+            if (rawIdsToDelete.length > 0) {
+                await client.query(
+                    `DELETE FROM unit_master_items
            WHERE unit_master_id = $1 AND raw_material_id = ANY($2::uuid[])`,
-          [unit_id, rawIdsToDelete]
-        );
-      }
-    }
+                    [unit_id, rawIdsToDelete]
+                );
+            }
+        }
 
-    await client.query("COMMIT");
-    return { status: true, message: "Unit master updated successfully" };
-  } catch (error) {
-    await client.query("ROLLBACK");
-    console.error("Error updating unit master:", error);
-    return { status: false, message: `Something went wrong. (${error.message})` };
-  } finally {
-    client.release();
-  }
+        await client.query("COMMIT");
+        return { status: true, message: "Unit master updated successfully" };
+    } catch (error) {
+        await client.query("ROLLBACK");
+        console.error("Error updating unit master:", error);
+        return { status: false, message: `Something went wrong. (${error.message})` };
+    } finally {
+        client.release();
+    }
 };
 
 
