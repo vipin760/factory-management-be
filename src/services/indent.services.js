@@ -2,7 +2,7 @@ const { pool } = require("../config/database");
 const { sqlQueryFun } = require("../database/sql/sqlFunction")
 const { validate: isUuid } = require('uuid');
 
-exports.createIndentService = async (body, userId) => {
+exports.createIndentService1 = async (body, userId) => {
   const client = await pool.connect();
   try {
     const { indent_no, status, batch_no, required_by, priority, notes } = body;
@@ -35,8 +35,8 @@ exports.createIndentService = async (body, userId) => {
       return { status: false, message: `An batch already used for this ${indentBatchCheck[0].batch_no} batch number` };
     }
 
-    const batchCheck = await sqlQueryFun(`SELECT * FROM batches WHERE id = $1`,[batch_no])
-    if(!batchCheck.length) return { status:false,message:"cannot find this batch number"}
+    const batchCheck = await sqlQueryFun(`SELECT * FROM batches WHERE id = $1`, [batch_no])
+    if (!batchCheck.length) return { status: false, message: "cannot find this batch number" }
 
     const validStatuses = ["draft", "submitted", "approved", "rejected"];
     const validPriorities = ["low", "medium", "high"];
@@ -81,6 +81,251 @@ exports.createIndentService = async (body, userId) => {
     client.release();
   }
 };
+
+// exports.createIndentService = async (body, userId) => {
+//   const client = await pool.connect();
+//   try {
+//     await client.query("BEGIN");
+
+//     const { indent_no, indent_date, status, items, calculation, remarks } = body;
+
+//     // === Basic Validation ===
+//     if (!indent_no) return { status: false, message: "Indent number is required." };
+//     if (!indent_date) return { status: false, message: "Indent date is required." };
+//     if (!Array.isArray(items) || items.length === 0)
+//       return { status: false, message: "At least one item is required." };
+
+//     // === Check if indent already exists ===
+//     const existingIndent = await client.query(
+//       `SELECT id FROM indents WHERE indent_no = $1`,
+//       [indent_no]
+//     );
+//     if (existingIndent.rows.length)
+//       return { status: false, message: `Indent number '${indent_no}' already exists.` };
+
+//     // === Validate and check stock availability ===
+//     for (const item of items) {
+//       const { raw_material_id, weight, article_name } = item;
+
+//       const rmRes = await client.query(
+//         `SELECT total_qty, name FROM raw_materials WHERE id = $1`,
+//         [raw_material_id]
+//       );
+
+//       if (!rmRes.rows.length) {
+//         await client.query("ROLLBACK");
+//         return {
+//           status: false,
+//           message: `Raw material not found for item '${article_name}'.`,
+//         };
+//       }
+
+//       const availableQty = Number(rmRes.rows[0].total_qty || 0);
+//       if (availableQty < weight) {
+//         await client.query("ROLLBACK");
+//         return {
+//           status: false,
+//           message: `Insufficient quantity for '${article_name}'. Available: ${availableQty}, Required: ${weight}`,
+//         };
+//       }
+//     }
+
+//     // === Insert into indents ===
+//     const insertIndentQuery = `
+//       INSERT INTO indents (indent_no, requested_by, status, indent_date, remarks)
+//       VALUES ($1, $2, $3, $4, $5)
+//       RETURNING id;
+//     `;
+//     const indentResult = await client.query(insertIndentQuery, [
+//       indent_no,
+//       userId,
+//       status || "draft",
+//       indent_date,
+//       remarks || null,
+//     ]);
+//     const indentId = indentResult.rows[0].id;
+
+//     // === Insert items & Deduct stock ===
+//     for (const item of items) {
+//       const { raw_material_id, article_name, weight, unit, rate } = item;
+
+//       // Calculate value automatically
+//       const value = Number(weight) * Number(rate);
+
+//       await client.query(
+//         `INSERT INTO indent_items (indent_id, raw_material_id, article_name, weight, unit, rate, value)
+//          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+//         [indentId, raw_material_id, article_name, weight, unit, rate, value]
+//       );
+
+//       await client.query(
+//         `UPDATE raw_materials
+//          SET total_qty = total_qty - $1
+//          WHERE id = $2`,
+//         [weight, raw_material_id]
+//       );
+//     }
+
+//     // === Auto calculation for totals ===
+//     const totalValue = items.reduce((sum, item) => sum + Number(item.weight) * Number(item.rate), 0);
+//     const profitPercentage = Number(calculation?.profit_percentage || 0);
+//     const taxPercentage = Number(calculation?.tax_percentage || 0);
+//     const roundOff = Number(calculation?.round_off || 0);
+
+//     const profitAmount = (totalValue * profitPercentage) / 100;
+//     const taxAmount = ((totalValue + profitAmount) * taxPercentage) / 100;
+//     const finalAmount = totalValue + profitAmount + taxAmount + roundOff;
+
+//     await client.query(
+//       `INSERT INTO indent_calculations 
+//        (indent_id, total_value, profit_percentage, profit_amount, tax_percentage, tax_amount, round_off, final_amount)
+//        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+//       [
+//         indentId,
+//         totalValue,
+//         profitPercentage,
+//         profitAmount,
+//         taxPercentage,
+//         taxAmount,
+//         roundOff,
+//         finalAmount,
+//       ]
+//     );
+
+//     // === Commit transaction ===
+//     await client.query("COMMIT");
+
+//     return {
+//       status: true,
+//       message: "Indent has been created successfully and stock updated.",
+//       data: {
+//         indent_id: indentId,
+//         total_value: totalValue,
+//         profit_amount: profitAmount,
+//         tax_amount: taxAmount,
+//         final_amount: finalAmount,
+//       },
+//     };
+//   } catch (error) {
+//     console.error("❌ Error in createIndentService:", error);
+//     await client.query("ROLLBACK");
+//     return { status: false, message: `Something went wrong (${error.message})` };
+//   } finally {
+//     client.release();
+//   }
+// };
+
+exports.createIndentService = async (body, userId) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { indent_no, indent_date, status, items, calculation, remarks } = body;
+
+    // === Basic Validation ===
+    if (!indent_no) return { status: false, message: "Indent number is required." };
+    if (!indent_date) return { status: false, message: "Indent date is required." };
+    if (!Array.isArray(items) || items.length === 0)
+      return { status: false, message: "At least one item is required." };
+
+    // === Check if indent already exists ===
+    const existingIndent = await client.query(
+      `SELECT id FROM indents WHERE indent_no = $1`,
+      [indent_no]
+    );
+    if (existingIndent.rows.length) {
+      return { status: false, message: `Indent number '${indent_no}' already exists.` };
+    }
+
+    // === Validate stock for each item ===
+    for (const item of items) {
+      const { raw_material_id, weight, article_name } = item;
+
+      const rmRes = await client.query(
+        `SELECT total_qty FROM raw_materials WHERE id = $1`,
+        [raw_material_id]
+      );
+
+      if (!rmRes.rows.length) {
+        await client.query("ROLLBACK");
+        return { status: false, message: `Raw material not found for '${article_name}'.` };
+      }
+
+      const availableQty = Number(rmRes.rows[0].total_qty || 0);
+      if (availableQty < weight) {
+        await client.query("ROLLBACK");
+        return {
+          status: false,
+          message: `Insufficient quantity for '${article_name}'. Available: ${availableQty}, Required: ${weight}`,
+        };
+      }
+    }
+
+    // === Insert into indents ===
+    const indentResult = await client.query(
+      `INSERT INTO indents (indent_no, requested_by, status, indent_date, remarks)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [indent_no, userId, status || "draft", indent_date, remarks || null]
+    );
+    const indentId = indentResult.rows[0].id;
+
+    // === Insert items & Deduct stock ===
+    for (const item of items) {
+      const { raw_material_id, article_name, weight, unit, rate, value } = item;
+
+      await client.query(
+        `INSERT INTO indent_items
+         (indent_id, raw_material_id, article_name, weight, unit, rate, value)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [indentId, raw_material_id, article_name, weight, unit, rate, value]
+      );
+
+      await client.query(
+        `UPDATE raw_materials SET total_qty = total_qty - $1 WHERE id = $2`,
+        [weight, raw_material_id]
+      );
+    }
+
+    // === Insert calculation ===
+    await client.query(
+      `INSERT INTO indent_calculations
+       (indent_id, total_value, profit_percentage, profit_amount, tax_percentage, tax_amount, round_off, final_amount)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        indentId,
+        calculation.total_value,
+        calculation.profit_percentage,
+        calculation.profit_amount,
+        calculation.tax_percentage,
+        calculation.tax_amount,
+        calculation.round_off,
+        calculation.final_amount,
+      ]
+    );
+
+    // === Commit transaction ===
+    await client.query("COMMIT");
+
+    return {
+      status: true,
+      message: "Indent created successfully and stock updated.",
+      data: {
+        indent_id: indentId,
+        items,
+        calculation,
+      },
+    };
+  } catch (error) {
+    console.error("❌ Error in createIndentService:", error);
+    await client.query("ROLLBACK");
+    return { status: false, message: `Something went wrong (${error.message})` };
+  } finally {
+    client.release();
+  }
+};
+
+
+
 
 exports.getAllIndentService2 = async (queryParams) => {
   try {
@@ -329,10 +574,10 @@ exports.updateIndentService = async (body, id, userId) => {
 
     if (indent_no !== undefined) { fields.push(`indent_no=$${idx++}`); values.push(indent_no); }
     if (status !== undefined) { fields.push(`status=$${idx++}`); values.push(status); }
-    if (batch_no !== undefined) { 
+    if (batch_no !== undefined) {
       if (!isUuid(batch_no)) throw new Error("Invalid batch_no UUID");
-      fields.push(`batch_no=$${idx++}`); 
-      values.push(batch_no); 
+      fields.push(`batch_no=$${idx++}`);
+      values.push(batch_no);
     }
     if (required_by !== undefined) { fields.push(`required_by=$${idx++}`); values.push(required_by); }
     if (priority !== undefined) { fields.push(`priority=$${idx++}`); values.push(priority); }

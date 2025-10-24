@@ -5,12 +5,11 @@ const { validate: isUuid } = require('uuid');
 exports.createNewPurchaseOrderService = async (body, userId, userRole) => {
   const client = await pool.connect();
   try {
-    const { po_no, vendor_id, indent_id, expected_delivery, remarks, items, status } = body;
+    const { po_no, vendor_id, expected_delivery, remarks, items, status } = body;
     if (status === "approved" && userRole != "admin") return { status: false, message: "Only the admin has permission to change this status" }
     // -------------------- VALIDATION --------------------
     if (!po_no) return { status: false, message: "PO number (po_no) is required." };
     if (!vendor_id) return { status: false, message: "Vendor ID is required." };
-    if (!indent_id) return { status: false, message: "Indent ID is required." };
     if (!Array.isArray(items) || items.length === 0) {
       return { status: false, message: "At least one item is required in the purchase order." };
     }
@@ -26,7 +25,6 @@ exports.createNewPurchaseOrderService = async (body, userId, userRole) => {
     }
 
     await client.query('BEGIN');
-
     // Check if PO number already exists
     const existingPO = await sqlQueryFun(
       `SELECT id FROM purchase_orders WHERE purchase_order_id = $1`,
@@ -38,11 +36,11 @@ exports.createNewPurchaseOrderService = async (body, userId, userRole) => {
     }
 
     // Check if indent exists
-    const indentCheck = await sqlQueryFun(`SELECT 1 FROM indents WHERE id = $1`, [indent_id]);
-    if (!indentCheck.length) {
-      await client.query('ROLLBACK');
-      return { status: false, message: `Indent with ID ${indent_id} not found.` };
-    }
+    // const indentCheck = await sqlQueryFun(`SELECT 1 FROM indents WHERE id = $1`, [indent_id]);
+    // if (!indentCheck.length) {
+    //   await client.query('ROLLBACK');
+    //   return { status: false, message: `Indent with ID ${indent_id} not found.` };
+    // }
 
     const vendorCheck = await sqlQueryFun(`SELECT 1 FROM vendors WHERE id = $1`, [vendor_id]);
     if (!vendorCheck.length) {
@@ -53,13 +51,12 @@ exports.createNewPurchaseOrderService = async (body, userId, userRole) => {
     // Insert purchase order
     const insertPOQuery = `
       INSERT INTO purchase_orders 
-        (purchase_order_id, indent_id, vendor_id, created_by, order_date, expected_delivery,status, remarks)
-      VALUES ($1, $2, $3, $4, $5, $6, $7,$8)
+        (purchase_order_id, vendor_id, created_by, order_date, expected_delivery,status, remarks)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *;
     `;
     let [po] = await sqlQueryFun(insertPOQuery, [
       po_no,
-      indent_id,
       vendor_id,
       userId,
       new Date(),
@@ -124,7 +121,7 @@ exports.createNewPurchaseOrderService = async (body, userId, userRole) => {
   }
 };
 
-exports.getAllPurchaseOrderService = async (queryParams) => {
+exports.getAllPurchaseOrderService1 = async (queryParams) => {
   try {
     let { po_no, vendor_id, vendor_name, status, startDate, endDate, page, limit, sortBy, sortOrder } = queryParams;
     page = parseInt(page) || 1;
@@ -258,6 +255,139 @@ exports.getAllPurchaseOrderService = async (queryParams) => {
   }
 };
 
+exports.getAllPurchaseOrderService = async (queryParams) => {
+  try {
+    let { po_no, vendor_id, vendor_name, status, startDate, endDate, page, limit, sortBy, sortOrder } = queryParams;
+    page = parseInt(page) || 1;
+    limit = limit ? parseInt(limit) : null;
+
+    sortBy = sortBy || 'created_at';
+    sortOrder = sortOrder?.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+
+    // Base query to fetch purchase orders with items
+    let baseQuery = `
+      SELECT po.*, v.name AS vendor_name,
+             json_agg(
+               json_build_object(
+                 'id', poi.id,
+                 'raw_material_id', poi.raw_material_id,
+                 'raw_material_name', rm.name,
+                 'raw_material_code', rm.code,
+                 'qty', poi.qty,
+                 'rate', poi.rate,
+                 'total_amount', poi.total_amount,
+                 'remarks', poi.remarks
+               )
+             ) FILTER (WHERE poi.id IS NOT NULL) AS items
+      FROM purchase_orders po
+      JOIN vendors v ON po.vendor_id = v.id
+      LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
+      LEFT JOIN raw_materials rm ON poi.raw_material_id = rm.id
+      WHERE 1=1
+    `;
+
+    const values = [];
+    let idx = 1;
+
+    if (po_no) {
+      baseQuery += ` AND po.purchase_order_id ILIKE $${idx}`;
+      values.push(`%${po_no}%`);
+      idx++;
+    }
+    if (vendor_id) {
+      baseQuery += ` AND po.vendor_id = $${idx}`;
+      values.push(vendor_id);
+      idx++;
+    }
+    if (vendor_name) {
+      baseQuery += ` AND v.name ILIKE $${idx}`;
+      values.push(`%${vendor_name}%`);
+      idx++;
+    }
+    if (status) {
+      baseQuery += ` AND po.status = $${idx}`;
+      values.push(status);
+      idx++;
+    }
+    if (startDate) {
+      baseQuery += ` AND po.created_at >= $${idx}`;
+      values.push(startDate);
+      idx++;
+    }
+    if (endDate) {
+      baseQuery += ` AND po.created_at <= $${idx}`;
+      values.push(endDate);
+      idx++;
+    }
+
+    baseQuery += ` GROUP BY po.id, v.name`;
+    baseQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
+
+    if (limit) {
+      const offset = (page - 1) * limit;
+      baseQuery += ` LIMIT ${limit} OFFSET ${offset}`;
+    }
+
+    const purchases = await sqlQueryFun(baseQuery, values);
+
+    // Total count for pagination
+    let countQuery = `
+      SELECT COUNT(DISTINCT po.id) AS total
+      FROM purchase_orders po
+      JOIN vendors v ON po.vendor_id = v.id
+      WHERE 1=1
+    `;
+    const countValues = [];
+    let countIdx = 1;
+
+    if (po_no) {
+      countQuery += ` AND po.purchase_order_id ILIKE $${countIdx}`;
+      countValues.push(`%${po_no}%`);
+      countIdx++;
+    }
+    if (vendor_id) {
+      countQuery += ` AND po.vendor_id = $${countIdx}`;
+      countValues.push(vendor_id);
+      countIdx++;
+    }
+    if (vendor_name) {
+      countQuery += ` AND v.name ILIKE $${countIdx}`;
+      countValues.push(`%${vendor_name}%`);
+      countIdx++;
+    }
+    if (status) {
+      countQuery += ` AND po.status = $${countIdx}`;
+      countValues.push(status);
+      countIdx++;
+    }
+    if (startDate) {
+      countQuery += ` AND po.created_at >= $${countIdx}`;
+      countValues.push(startDate);
+      countIdx++;
+    }
+    if (endDate) {
+      countQuery += ` AND po.created_at <= $${countIdx}`;
+      countValues.push(endDate);
+      countIdx++;
+    }
+
+    const countResult = await sqlQueryFun(countQuery, countValues);
+    const total = parseInt(countResult[0]?.total || 0);
+
+    const result = { purchases, total, page, limit: limit || total };
+    if (purchases.length !== 0)
+      return { status: true, message: "Purchase orders fetched successfully", data: result };
+
+    return { status: true, message: "No purchase orders found", data: result };
+  } catch (error) {
+    return {
+      status: false,
+      message: `Something went wrong. (${error.message})`
+    };
+  }
+};
+
+
 exports.deletePurchaseOrderService = async (id) => {
   try {
     if (!id) return { status: false, message: "id is required" }
@@ -273,15 +403,15 @@ exports.deletePurchaseOrderService = async (id) => {
   }
 }
 
-exports.updatePurchaseOrderService = async (id, body) => {
+exports.updatePurchaseOrderService1 = async (id, body) => {
   try {
     const { po_no, vendor_id, expected_delivery, indent_id, status, items } = body;
     if (!id) return { status: false, message: "Purchase Order ID is required." };
-
     const [existing] = await sqlQueryFun(
       `SELECT id FROM purchase_orders WHERE id = $1`,
       [id]
     );
+    console.log("<><>existing",existing)
     if (!existing) {
       return { status: false, message: "Purchase order not found." };
     }
@@ -385,6 +515,57 @@ exports.updatePurchaseOrderService = async (id, body) => {
     };
   }
 };
+
+exports.updatePurchaseOrderService = async (id, body) => {
+  const client = await pool.connect(); // Using a transaction for safety
+  try {
+    await client.query("BEGIN");
+
+    const { status } = body;
+    if (!id) return { status: false, message: "Purchase Order ID is required." };
+    if (!status) return { status: false, message: "Purchase Order status is required." };
+
+    // Check if purchase order exists
+    const existingRes = await client.query(`SELECT id, status FROM purchase_orders WHERE id = $1`, [id]);
+    if (!existingRes.rows.length) {
+      await client.query("ROLLBACK");
+      return { status: false, message: "Purchase order not found." };
+    }
+    const existingStatus = existingRes.rows[0].status;
+
+    if(existingStatus === "received"){
+      return { status: false, message: "Purchase order already recieved please check" };
+    }
+
+    let purchase_order_items = await client.query(`SELECT * FROM purchase_order_items WHERE purchase_order_id =$1`,[id])
+    purchase_order_items = purchase_order_items.rows
+    for(const item of purchase_order_items){
+      await client.query(`UPDATE raw_materials
+     SET total_qty = total_qty + $1
+     WHERE id = $2`,
+    [Number(item.qty), item.raw_material_id])
+    }
+
+     await client.query(
+      `UPDATE purchase_orders SET status = 'received' WHERE id = $1`,
+      [id]
+    );
+
+    await client.query("COMMIT");
+    return { status: true, message: "Purchase order updated successfully." };
+
+  } catch (error) {
+    console.log("<><>err",error)
+    await client.query("ROLLBACK");
+    return {
+      status: false,
+      message: `Something went wrong on our end. Please try again later. (${error.message})`,
+    };
+  } finally {
+    client.release();
+  }
+};
+
 
 
 

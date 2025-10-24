@@ -270,7 +270,6 @@ exports.fetchRecentActivity = async (params = {}) => {
         const limitIndex = values.length - 1;
         const offsetIndex = values.length;
 const data1 = await client.query(`SELECT * FROM audit_logs`)
-console.log("<><>data1",data1)
         const recentActivityQuery = `
       SELECT
         a.entity_type,
