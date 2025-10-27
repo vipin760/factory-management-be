@@ -34,13 +34,13 @@ exports.createUnitMaster = async (userId, body) => {
                 await client.query(
                     `INSERT INTO unit_master_items (unit_master_id, raw_material_id, weight, unit, rate)
                     VALUES ($1, $2, $3, $4, $5);`,
-                    [unitMasterId, item.raw_material_id, item.weight, item.unit, item.rate]
+                    [unitMasterId, item.raw_material_id, item.weight || 0, item.unit || "nil", item.rate || 0]
                 );
             }
         }
 
-        const data = await client.query('COMMIT');
-        return { status: true, data, message: "Unit master created successfully" };
+         await client.query('COMMIT');
+        return { status: true, data:result, message: "Unit master created successfully" };
     } catch (error) {
         await client.query('ROLLBACK');
         return { status: false, message: `Something went wrong. (${error.message})` };

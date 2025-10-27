@@ -61,11 +61,38 @@ async function createTablesIfNotExist() {
   created_at TIMESTAMP DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS unit_master (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  unit_name TEXT NOT NULL,
+  department_name TEXT,
+  purpose TEXT,
+  shop_name TEXT,
+  product_name TEXT,
+  created_by UUID REFERENCES users(id),
+  updated_by UUID REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT now(),
+   updated_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS unit_master_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  unit_master_id UUID REFERENCES unit_master(id) ON DELETE CASCADE,
+  raw_material_id UUID REFERENCES raw_materials(id),
+  weight NUMERIC,
+  unit TEXT,
+  rate NUMERIC,
+  value NUMERIC,
+  created_at TIMESTAMP DEFAULT now(),
+   updated_at TIMESTAMP DEFAULT now()
+);
+
   -- Indents table
   CREATE TABLE IF NOT EXISTS indents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     indent_no TEXT UNIQUE NOT NULL,
     requested_by UUID REFERENCES users(id) NOT NULL,
+    unit_master_id UUID REFERENCES unit_master(id) NOT NULL,
+    quantity NUMERIC,
     status TEXT DEFAULT 'draft' NOT NULL,
     indent_date DATE,
     remarks TEXT,
@@ -232,31 +259,6 @@ CREATE TABLE IF NOT EXISTS batch_raw_material_consumptions (
     verified_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT now(),
     updated_at TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS unit_master (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  unit_name TEXT NOT NULL,
-  department_name TEXT,
-  purpose TEXT,
-  shop_name TEXT,
-  product_name TEXT,
-  created_by UUID REFERENCES users(id),
-  updated_by UUID REFERENCES users(id),
-  created_at TIMESTAMP DEFAULT now(),
-   updated_at TIMESTAMP DEFAULT now()
-);
-
-  CREATE TABLE IF NOT EXISTS unit_master_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  unit_master_id UUID REFERENCES unit_master(id) ON DELETE CASCADE,
-  raw_material_id UUID REFERENCES raw_materials(id),
-  weight NUMERIC,
-  unit TEXT,
-  rate NUMERIC,
-  value NUMERIC,
-  created_at TIMESTAMP DEFAULT now(),
-   updated_at TIMESTAMP DEFAULT now()
 );
 
 `);
