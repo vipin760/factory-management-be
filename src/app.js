@@ -30,6 +30,7 @@ const batchRoutes = require('./routes/batch.route')
 const historyRoutes = require('./routes/history.routes')
 const dashboardRoutes = require('./routes/dashboard.route')
 const fileUploadRoutes = require('./routes/fileUpload.route')
+const unitRoutes = require('./routes/unit.route')
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -49,6 +50,8 @@ app.use("/api/product",productRoutes)
 app.use("/api/batch",batchRoutes)
 app.use("/api/logs",historyRoutes)
 app.use("/api/upload",fileUploadRoutes)
+app.use("/api/dashboard",dashboardRoutes)
+app.use("/api/unit",unitRoutes)
 
 //error middleware
 app.use(errorMiddleare);

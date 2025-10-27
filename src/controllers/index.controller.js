@@ -15,7 +15,9 @@ exports.createDefaultUser = catchAsync( async(req ,res,next)=>{
       const emailExistQry = `SELECT * FROM users WHERE email = $1`
       const emailExistVal = [email]
       const EmailExist = await sqlQueryFun(emailExistQry, emailExistVal)
-      if (EmailExist.length != 0) return { status: false, data: EmailExist, message: "Email already exist" }
+      if (EmailExist.length != 0) {
+        return { status: false, data: EmailExist, message: "Email already exist" }
+      }
   
       const createUserQry = ` INSERT INTO users (name, email, password_hash, role)
       VALUES ($1, $2, $3, $4)

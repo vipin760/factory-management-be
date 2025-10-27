@@ -2,7 +2,7 @@ const { pool } = require("../config/database");
 const { sqlQueryFun } = require("../database/sql/sqlFunction")
 const { validate: isUuid } = require('uuid');
 
-exports.createIndentService = async (body, userId) => {
+exports.createIndentService1 = async (body, userId) => {
   const client = await pool.connect();
   try {
     const { indent_no, status, batch_no, required_by, priority, notes } = body;
@@ -35,8 +35,8 @@ exports.createIndentService = async (body, userId) => {
       return { status: false, message: `An batch already used for this ${indentBatchCheck[0].batch_no} batch number` };
     }
 
-    const batchCheck = await sqlQueryFun(`SELECT * FROM batches WHERE id = $1`,[batch_no])
-    if(!batchCheck.length) return { status:false,message:"cannot find this batch number"}
+    const batchCheck = await sqlQueryFun(`SELECT * FROM batches WHERE id = $1`, [batch_no])
+    if (!batchCheck.length) return { status: false, message: "cannot find this batch number" }
 
     const validStatuses = ["draft", "submitted", "approved", "rejected"];
     const validPriorities = ["low", "medium", "high"];
@@ -81,6 +81,524 @@ exports.createIndentService = async (body, userId) => {
     client.release();
   }
 };
+
+// exports.createIndentService = async (body, userId) => {
+//   const client = await pool.connect();
+//   try {
+//     await client.query("BEGIN");
+
+//     const { indent_no, indent_date, status, items, calculation, remarks } = body;
+
+//     // === Basic Validation ===
+//     if (!indent_no) return { status: false, message: "Indent number is required." };
+//     if (!indent_date) return { status: false, message: "Indent date is required." };
+//     if (!Array.isArray(items) || items.length === 0)
+//       return { status: false, message: "At least one item is required." };
+
+//     // === Check if indent already exists ===
+//     const existingIndent = await client.query(
+//       `SELECT id FROM indents WHERE indent_no = $1`,
+//       [indent_no]
+//     );
+//     if (existingIndent.rows.length)
+//       return { status: false, message: `Indent number '${indent_no}' already exists.` };
+
+//     // === Validate and check stock availability ===
+//     for (const item of items) {
+//       const { raw_material_id, weight, article_name } = item;
+
+//       const rmRes = await client.query(
+//         `SELECT total_qty, name FROM raw_materials WHERE id = $1`,
+//         [raw_material_id]
+//       );
+
+//       if (!rmRes.rows.length) {
+//         await client.query("ROLLBACK");
+//         return {
+//           status: false,
+//           message: `Raw material not found for item '${article_name}'.`,
+//         };
+//       }
+
+//       const availableQty = Number(rmRes.rows[0].total_qty || 0);
+//       if (availableQty < weight) {
+//         await client.query("ROLLBACK");
+//         return {
+//           status: false,
+//           message: `Insufficient quantity for '${article_name}'. Available: ${availableQty}, Required: ${weight}`,
+//         };
+//       }
+//     }
+
+//     // === Insert into indents ===
+//     const insertIndentQuery = `
+//       INSERT INTO indents (indent_no, requested_by, status, indent_date, remarks)
+//       VALUES ($1, $2, $3, $4, $5)
+//       RETURNING id;
+//     `;
+//     const indentResult = await client.query(insertIndentQuery, [
+//       indent_no,
+//       userId,
+//       status || "draft",
+//       indent_date,
+//       remarks || null,
+//     ]);
+//     const indentId = indentResult.rows[0].id;
+
+//     // === Insert items & Deduct stock ===
+//     for (const item of items) {
+//       const { raw_material_id, article_name, weight, unit, rate } = item;
+
+//       // Calculate value automatically
+//       const value = Number(weight) * Number(rate);
+
+//       await client.query(
+//         `INSERT INTO indent_items (indent_id, raw_material_id, article_name, weight, unit, rate, value)
+//          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+//         [indentId, raw_material_id, article_name, weight, unit, rate, value]
+//       );
+
+//       await client.query(
+//         `UPDATE raw_materials
+//          SET total_qty = total_qty - $1
+//          WHERE id = $2`,
+//         [weight, raw_material_id]
+//       );
+//     }
+
+//     // === Auto calculation for totals ===
+//     const totalValue = items.reduce((sum, item) => sum + Number(item.weight) * Number(item.rate), 0);
+//     const profitPercentage = Number(calculation?.profit_percentage || 0);
+//     const taxPercentage = Number(calculation?.tax_percentage || 0);
+//     const roundOff = Number(calculation?.round_off || 0);
+
+//     const profitAmount = (totalValue * profitPercentage) / 100;
+//     const taxAmount = ((totalValue + profitAmount) * taxPercentage) / 100;
+//     const finalAmount = totalValue + profitAmount + taxAmount + roundOff;
+
+//     await client.query(
+//       `INSERT INTO indent_calculations 
+//        (indent_id, total_value, profit_percentage, profit_amount, tax_percentage, tax_amount, round_off, final_amount)
+//        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+//       [
+//         indentId,
+//         totalValue,
+//         profitPercentage,
+//         profitAmount,
+//         taxPercentage,
+//         taxAmount,
+//         roundOff,
+//         finalAmount,
+//       ]
+//     );
+
+//     // === Commit transaction ===
+//     await client.query("COMMIT");
+
+//     return {
+//       status: true,
+//       message: "Indent has been created successfully and stock updated.",
+//       data: {
+//         indent_id: indentId,
+//         total_value: totalValue,
+//         profit_amount: profitAmount,
+//         tax_amount: taxAmount,
+//         final_amount: finalAmount,
+//       },
+//     };
+//   } catch (error) {
+//     console.error("❌ Error in createIndentService:", error);
+//     await client.query("ROLLBACK");
+//     return { status: false, message: `Something went wrong (${error.message})` };
+//   } finally {
+//     client.release();
+//   }
+// };
+
+exports.createIndentService = async (body, userId) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { indent_no, indent_date, quantity, status, items, unit_master_id, calculation, remarks } = body;
+
+    // === Basic Validation ===
+    if (!indent_no) return { status: false, message: "Indent number is required." };
+    if (!indent_date) return { status: false, message: "Indent date is required." };
+    if (!unit_master_id) return { status: false, message: "unit_master_id is required." };
+    if (!quantity) return { status: false, message: "quantity is required." };
+    if (!Array.isArray(items) || items.length === 0)
+      return { status: false, message: "At least one item is required." };
+
+    // === Check if indent already exists ===
+    const existingIndent = await client.query(
+      `SELECT id FROM indents WHERE indent_no = $1`,
+      [indent_no]
+    );
+    if (existingIndent.rows.length) {
+      return { status: false, message: `Indent number '${indent_no}' already exists.` };
+    }
+
+    // === Validate stock for each item ===
+    for (const item of items) {
+      const { raw_material_id, weight, article_name } = item;
+
+      const rmRes = await client.query(
+        `SELECT total_qty FROM raw_materials WHERE id = $1`,
+        [raw_material_id]
+      );
+
+      if (!rmRes.rows.length) {
+        await client.query("ROLLBACK");
+        return { status: false, message: `Raw material not found for '${article_name}'.` };
+      }
+
+      const availableQty = Number(rmRes.rows[0].total_qty || 0);
+      if (availableQty < weight) {
+        await client.query("ROLLBACK");
+        return {
+          status: false,
+          message: `Insufficient quantity for '${article_name}'. Available: ${availableQty}, Required: ${weight}`,
+        };
+      }
+    }
+
+    // === Insert into indents ===
+    const indentResult = await client.query(
+      `INSERT INTO indents (indent_no, requested_by, status,quantity, indent_date,unit_master_id, remarks)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [indent_no, userId, status || "draft", quantity, indent_date, unit_master_id, remarks || null]
+    );
+    const indentId = indentResult.rows[0].id;
+
+    // === Insert items & Deduct stock ===
+    for (const item of items) {
+      const { raw_material_id, article_name, weight, unit, rate, value } = item;
+
+      await client.query(
+        `INSERT INTO indent_items
+         (indent_id, raw_material_id, article_name, weight, unit, rate, value)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [indentId, raw_material_id, article_name || "nil", weight, unit, rate, value]
+      );
+
+      await client.query(
+        `UPDATE raw_materials SET total_qty = total_qty - $1 WHERE id = $2`,
+        [weight, raw_material_id]
+      );
+    }
+
+    // === Insert calculation ===
+    await client.query(
+      `INSERT INTO indent_calculations
+       (indent_id, total_value, profit_percentage, profit_amount, tax_percentage, tax_amount, round_off, final_amount)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        indentId,
+        calculation.total_value,
+        calculation.profit_percentage,
+        calculation.profit_amount,
+        calculation.tax_percentage,
+        calculation.tax_amount,
+        calculation.round_off,
+        calculation.final_amount,
+      ]
+    );
+
+    // === Commit transaction ===
+    await client.query("COMMIT");
+
+    return {
+      status: true,
+      message: "Indent created successfully and stock updated.",
+      data: {
+        indent_id: indentId,
+        items,
+        calculation,
+      },
+    };
+  } catch (error) {
+    console.error("❌ Error in createIndentService:", error);
+    await client.query("ROLLBACK");
+    return { status: false, message: `Something went wrong (${error.message})` };
+  } finally {
+    client.release();
+  }
+};
+
+// exports.getAllIndentService = async (query) => {
+//   const client = await pool.connect();
+//   try {
+//     const {
+//       search,
+//       status,
+//       unit_master_id,
+//       start_date,
+//       end_date,
+//       sort_by = "indent_date",
+//       sort_order = "DESC",
+//       page = 1,
+//       limit = 10
+//     } = query;
+
+//     let baseQuery = `
+//   SELECT 
+//       i.id, 
+//       i.indent_no, 
+//       i.indent_date, 
+//       i.status, 
+//       i.remarks,
+//       i.quantity,
+//       u.name AS requested_by_name,
+//       um.unit_name,
+//       ic.total_value,
+//       ic.profit_percentage,
+//       ic.profit_amount,
+//       ic.tax_percentage,
+//       ic.tax_amount,
+//       ic.round_off,
+//       ic.final_amount,
+//       -- 🧮 Calculate per-unit cost
+//       CASE 
+//           WHEN i.quantity > 0 
+//           THEN ROUND(ic.final_amount / i.quantity, 2)
+//           ELSE 0
+//       END AS per_unit_cost
+//   FROM indents i
+//   LEFT JOIN users u ON u.id = i.requested_by
+//   LEFT JOIN unit_master um ON um.id = i.unit_master_id
+//   LEFT JOIN indent_calculations ic ON ic.indent_id = i.id
+//   WHERE 1=1
+// `;
+
+
+//     const values = [];
+//     let counter = 1;
+
+//     if (search) {
+//       baseQuery += ` AND (i.indent_no ILIKE $${counter} OR u.name ILIKE $${counter})`;
+//       values.push(`%${search}%`);
+//       counter++;
+//     }
+
+//     if (status) {
+//       baseQuery += ` AND i.status = $${counter}`;
+//       values.push(status);
+//       counter++;
+//     }
+
+//     if (unit_master_id) {
+//       baseQuery += ` AND i.unit_master_id = $${counter}`;
+//       values.push(unit_master_id);
+//       counter++;
+//     }
+
+//     if (start_date && end_date) {
+//       baseQuery += ` AND i.indent_date BETWEEN $${counter} AND $${counter + 1}`;
+//       values.push(start_date, end_date);
+//       counter += 2;
+//     }
+
+//     baseQuery += ` ORDER BY ${sort_by} ${sort_order}`;
+
+//     let resultQuery = baseQuery;
+//     let paginationInfo = {};
+
+//     if (limit !== "all") {
+//       const offset = (page - 1) * limit;
+//       const countQuery = `SELECT COUNT(*) AS total FROM (${baseQuery}) AS total_table`;
+//       const countResult = await client.query(countQuery, values);
+//       const totalRecords = parseInt(countResult.rows[0].total, 10);
+
+//       resultQuery += ` LIMIT $${counter} OFFSET $${counter + 1}`;
+//       values.push(limit, offset);
+
+//       paginationInfo = {
+//         totalRecords,
+//         totalPages: Math.ceil(totalRecords / limit),
+//         currentPage: Number(page),
+//         limit: Number(limit)
+//       };
+//     } else {
+//       paginationInfo = { totalRecords: "all", totalPages: 1, currentPage: 1, limit: "all" };
+//     }
+
+//     const indentsResult = await client.query(resultQuery, values);
+//     const indents = indentsResult.rows;
+
+//     // === Fetch indent items for all indents ===
+//     const indentIds = indents.map(i => i.id);
+//     let itemsMap = {};
+
+//     if (indentIds.length > 0) {
+//       const itemsQuery = `
+//         SELECT it.*, rm.name AS raw_material_name
+//         FROM indent_items it
+//         LEFT JOIN raw_materials rm ON rm.id = it.raw_material_id
+//         WHERE it.indent_id = ANY($1)
+//       `;
+//       const itemsResult = await client.query(itemsQuery, [indentIds]);
+//       itemsMap = itemsResult.rows.reduce((acc, item) => {
+//         acc[item.indent_id] = acc[item.indent_id] || [];
+//         acc[item.indent_id].push(item);
+//         return acc;
+//       }, {});
+//     }
+
+//     // === Attach items to indents ===
+//     const finalData = indents.map(indent => ({
+//       ...indent,
+//       items: itemsMap[indent.id] || []
+//     }));
+
+//     return {
+//       status: true,
+//       message: "Indents fetched successfully.",
+//       data: finalData,
+//       pagination: paginationInfo
+//     };
+//   } catch (error) {
+//     console.error("❌ Error in getAllIndentService:", error);
+//     return { status: false, message: `Something went wrong (${error.message})` };
+//   } finally {
+//     client.release();
+//   }
+// };
+
+exports.getAllIndentService = async (query) => {
+  const client = await pool.connect();
+  try {
+    const {
+      search,
+      status,
+      unit_master_id,
+      start_date,
+      end_date,
+      sort_by = "indent_date",
+      sort_order = "DESC",
+      page = 1,
+      limit = 10
+    } = query;
+
+    let baseQuery = `
+      SELECT 
+          i.id, 
+          i.indent_no, 
+          i.indent_date, 
+          i.status, 
+          i.remarks,
+          i.quantity,
+          u.name AS requested_by_name,
+          um.unit_name,
+          ic.total_value,
+          ic.profit_percentage,
+          ic.profit_amount,
+          ic.tax_percentage,
+          ic.tax_amount,
+          ic.round_off,
+          ic.final_amount,
+          CASE 
+              WHEN i.quantity > 0 
+              THEN ROUND(ic.final_amount / i.quantity, 2)
+              ELSE 0
+          END AS per_unit_cost
+      FROM indents i
+      LEFT JOIN users u ON u.id = i.requested_by
+      LEFT JOIN unit_master um ON um.id = i.unit_master_id
+      LEFT JOIN indent_calculations ic ON ic.indent_id = i.id
+      WHERE 1=1
+    `;
+
+    const values = [];
+    let counter = 1;
+
+    if (search) {
+      baseQuery += ` AND (i.indent_no ILIKE $${counter} OR u.name ILIKE $${counter})`;
+      values.push(`%${search}%`);
+      counter++;
+    }
+
+    if (status) {
+      baseQuery += ` AND i.status = $${counter}`;
+      values.push(status);
+      counter++;
+    }
+
+    if (unit_master_id) {
+      baseQuery += ` AND i.unit_master_id = $${counter}`;
+      values.push(unit_master_id);
+      counter++;
+    }
+
+    if (start_date && end_date) {
+      baseQuery += ` AND i.indent_date BETWEEN $${counter} AND $${counter + 1}`;
+      values.push(start_date, end_date);
+      counter += 2;
+    }
+
+    baseQuery += ` ORDER BY ${sort_by} ${sort_order}`;
+
+    // === Count total records ===
+    const countQuery = `SELECT COUNT(*) AS total FROM (${baseQuery}) AS total_table`;
+    const countResult = await client.query(countQuery, values);
+    const totalRecords = parseInt(countResult.rows[0].total, 10);
+
+    // === Pagination ===
+    let resultQuery = baseQuery;
+    if (limit !== "all") {
+      const offset = (page - 1) * limit;
+      resultQuery += ` LIMIT $${counter} OFFSET $${counter + 1}`;
+      values.push(limit, offset);
+    }
+
+    const indentsResult = await client.query(resultQuery, values);
+    const indents = indentsResult.rows;
+
+    // === Fetch indent items ===
+    const indentIds = indents.map(i => i.id);
+    let itemsMap = {};
+
+    if (indentIds.length > 0) {
+      const itemsQuery = `
+        SELECT it.*, rm.name AS raw_material_name
+        FROM indent_items it
+        LEFT JOIN raw_materials rm ON rm.id = it.raw_material_id
+        WHERE it.indent_id = ANY($1)
+      `;
+      const itemsResult = await client.query(itemsQuery, [indentIds]);
+      itemsMap = itemsResult.rows.reduce((acc, item) => {
+        acc[item.indent_id] = acc[item.indent_id] || [];
+        acc[item.indent_id].push(item);
+        return acc;
+      }, {});
+    }
+
+    // === Attach items + totalRecords to each indent ===
+    const finalData = indents.map(indent => ({
+      ...indent,
+      items: itemsMap[indent.id] || [],
+      totalRecords // 👈 Add inside each object
+    }));
+
+    // ✅ Return totalRecords outside + inside each record
+    return {
+      status: true,
+      message: "Indents fetched successfully.",
+      totalRecords,
+      data: finalData
+    };
+
+  } catch (error) {
+    console.error("❌ Error in getAllIndentService:", error);
+    return { status: false, message: `Something went wrong (${error.message})` };
+  } finally {
+    client.release();
+  }
+};
+
+
+
+
 
 exports.getAllIndentService2 = async (queryParams) => {
   try {
@@ -151,7 +669,7 @@ exports.getAllIndentService2 = async (queryParams) => {
     };
   }
 };
-exports.getAllIndentService = async (queryParams) => {
+exports.getAllIndentService3 = async (queryParams) => {
   try {
     let { page, limit, sortBy, sortOrder, search, status, priority } = queryParams;
 
@@ -321,18 +839,19 @@ exports.updateIndentService = async (body, id, userId) => {
       return { status: false, message: "Indent not found." };
     }
 
-    const { indent_no, status, batch_no, required_by, priority, notes } = body;
+    const { indent_no,quantity, status, batch_no, required_by, priority, notes } = body;
 
     const fields = [];
     const values = [];
     let idx = 1;
 
     if (indent_no !== undefined) { fields.push(`indent_no=$${idx++}`); values.push(indent_no); }
+    if (quantity !== undefined) { fields.push(`quantity=$${idx++}`); values.push(quantity); }
     if (status !== undefined) { fields.push(`status=$${idx++}`); values.push(status); }
-    if (batch_no !== undefined) { 
+    if (batch_no !== undefined) {
       if (!isUuid(batch_no)) throw new Error("Invalid batch_no UUID");
-      fields.push(`batch_no=$${idx++}`); 
-      values.push(batch_no); 
+      fields.push(`batch_no=$${idx++}`);
+      values.push(batch_no);
     }
     if (required_by !== undefined) { fields.push(`required_by=$${idx++}`); values.push(required_by); }
     if (priority !== undefined) { fields.push(`priority=$${idx++}`); values.push(priority); }

@@ -24,18 +24,22 @@ async function clearAllTables() {
     batches,
     products,
     ordered_item_history,
-    batch_expenses
+    batch_expenses,
+    indent_calculations,
+    indent_items,
+    purchase_order_files,
+    raw_material_movements
   RESTART IDENTITY CASCADE;
 `);
-//  users,
+    //  users,
     // Re-enable foreign key constraints
     await pool.query('SET session_replication_role = DEFAULT;');
 
     console.log('✅ All tables cleared successfully.');
-    return { status:true,message:"All tables cleared successfully"}
+    return { status: true, message: "All tables cleared successfully" }
   } catch (err) {
     console.error('❌ Failed to clear tables:', err);
-    return { status:false,message:`${err.message}`}
+    return { status: false, message: `${err.message}` }
   }
 }
 
@@ -62,10 +66,13 @@ async function dropAllTables() {
       'batches',
       'products',
       'ordered_item_history',
-      'batch_expenses'
-
+      'batch_expenses',
+      'indent_calculations',
+      'indent_items',
+      'purchase_order_files',
+      'raw_material_movements'
     ];
-//  'users',
+    //  'users',
     for (const table of tables) {
       await pool.query(`DROP TABLE IF EXISTS ${table} CASCADE;`);
     }
@@ -74,10 +81,10 @@ async function dropAllTables() {
     await pool.query('SET session_replication_role = DEFAULT;');
 
     console.log('✅ All tables dropped successfully.');
-    return { status: true ,message:"All tables dropped successfully"};
+    return { status: true, message: "All tables dropped successfully" };
   } catch (err) {
     console.error('❌ Failed to drop tables:', err);
     return { status: false, message: err.message };
   }
 }
-module.exports = { clearAllTables,dropAllTables };
+module.exports = { clearAllTables, dropAllTables };
