@@ -555,7 +555,6 @@ exports.updatePurchaseOrderService = async (id, body) => {
     return { status: true, message: "Purchase order updated successfully." };
 
   } catch (error) {
-    console.log("<><>err",error)
     await client.query("ROLLBACK");
     return {
       status: false,

@@ -12,7 +12,6 @@ exports.createUnitMaster = async (userId, body) => {
         await client.query('BEGIN');
         const { unit_name, department_name, purpose, shop_name, product_name, items } = body;
         const unit_nameExist = await client.query(`SELECT * FROM unit_master WHERE unit_name ILIKE $1`, [unit_name])
-        console.log("<><>unit_nameExist", unit_nameExist)
         if (unit_nameExist.rows.length) return { status: false, message: `Already exist ${unit_name} unit` }
 
         const insertMasterQuery = `
@@ -32,9 +31,9 @@ exports.createUnitMaster = async (userId, body) => {
         if (Array.isArray(items) && items.length > 0) {
             for (const item of items) {
                 await client.query(
-                    `INSERT INTO unit_master_items (unit_master_id, raw_material_id, weight, unit, rate)
-                    VALUES ($1, $2, $3, $4, $5);`,
-                    [unitMasterId, item.raw_material_id, item.weight || 0, item.unit || "nil", item.rate || 0]
+                    `INSERT INTO unit_master_items (unit_master_id, raw_material_id)
+                    VALUES ($1, $2);`,
+                    [unitMasterId, item.raw_material_id]
                 );
             }
         }

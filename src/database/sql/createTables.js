@@ -78,10 +78,6 @@ CREATE TABLE IF NOT EXISTS unit_master_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   unit_master_id UUID REFERENCES unit_master(id) ON DELETE CASCADE,
   raw_material_id UUID REFERENCES raw_materials(id),
-  weight NUMERIC,
-  unit TEXT,
-  rate NUMERIC,
-  value NUMERIC,
   created_at TIMESTAMP DEFAULT now(),
    updated_at TIMESTAMP DEFAULT now()
 );
@@ -106,7 +102,6 @@ CREATE TABLE IF NOT EXISTS unit_master_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   indent_id UUID REFERENCES indents(id) ON DELETE CASCADE,
   raw_material_id UUID REFERENCES raw_materials(id),
-  article_name TEXT NOT NULL,
   weight NUMERIC,
   unit TEXT,
   rate NUMERIC,
@@ -257,6 +252,19 @@ CREATE TABLE IF NOT EXISTS batch_raw_material_consumptions (
     remarks TEXT,                     -- Optional notes about the file
     verified_by UUID REFERENCES users(id), -- Admin who verifies
     verified_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT now(),
+    updated_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS rm_issue_register (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    issue_date DATE NOT NULL,                      -- Date
+    description TEXT,                              -- Particulars / Description (e.g., RM issued vide indent no.)
+    indent_no UUID REFERENCES indents(id) ON DELETE CASCADE NOT NULL, -- Indent No.
+    raw_material_id UUID REFERENCES raw_materials(id) ON DELETE CASCADE, -- Raw Material reference
+    quantity_issued_kg NUMERIC(10,3),              -- Quantity Issued (kg)
+    balance_kg NUMERIC(10,3),                      -- Balance (kg)
+    remarks TEXT,                                  -- Remarks or Checkmark info
     created_at TIMESTAMP DEFAULT now(),
     updated_at TIMESTAMP DEFAULT now()
 );

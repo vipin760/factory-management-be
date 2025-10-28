@@ -1,3 +1,4 @@
+const { pool } = require("../config/database");
 const { sqlQueryFun } = require("../database/sql/sqlFunction");
 
 
@@ -96,6 +97,127 @@ exports.getAllPurchaseHistoryService = async (queryParams) => {
     };
   } catch (error) {
     console.error("❌ Error in getAllPurchaseHistoryService:", error);
+    return {
+      status: false,
+      message: `Something went wrong. (${error.message})`,
+    };
+  }
+};
+
+
+exports.getAllIndentwisePurchaseHistoryService = async (query) => {
+  try {
+    const {
+      indent_id,           // filter by indent
+      raw_material_id,     // filter by raw material
+      search,              // keyword search
+      sort_by = "issue_date",  // sort column
+      sort_order = "DESC",     // ASC or DESC
+      page = 1,                // pagination
+      limit = 10
+    } = query;
+
+    const offset = (page - 1) * limit;
+
+    let baseQuery = `
+      SELECT 
+        r.id,
+        r.issue_date,
+        r.description,
+        r.quantity_issued_kg,
+        r.balance_kg,
+        r.remarks,
+        rm.name AS raw_material_name,
+        rm.total_qty AS current_qty_raw_materials,
+        i.indent_no AS indent_number,
+        um.unit_name
+      FROM rm_issue_register r
+      LEFT JOIN raw_materials rm ON r.raw_material_id = rm.id
+      LEFT JOIN indents i ON r.indent_no = i.id
+      LEFT JOIN unit_master um ON i.unit_master_id = um.id
+      WHERE 1=1
+    `;
+
+    const params = [];
+    let paramIndex = 1;
+
+    // Filter by indent_id
+    if (indent_id) {
+      baseQuery += ` AND r.indent_no = $${paramIndex++}`;
+      params.push(indent_id);
+    }
+
+    // Filter by raw_material_id
+    if (raw_material_id) {
+      baseQuery += ` AND r.raw_material_id = $${paramIndex++}`;
+      params.push(raw_material_id);
+    }
+
+    // Search in description or remarks
+    if (search) {
+      baseQuery += ` AND (LOWER(r.description) LIKE LOWER($${paramIndex}) OR LOWER(r.remarks) LIKE LOWER($${paramIndex}))`;
+      params.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    // Sorting
+    const validSortColumns = [
+      "issue_date",
+      "quantity_issued_kg",
+      "balance_kg",
+      "raw_material_name",
+      "indent_number"
+    ];
+    const orderByColumn = validSortColumns.includes(sort_by) ? sort_by : "issue_date";
+    const orderDirection = sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC";
+    baseQuery += ` ORDER BY ${orderByColumn} ${orderDirection}`;
+
+    // Pagination
+    baseQuery += ` LIMIT $${paramIndex++} OFFSET $${paramIndex}`;
+    params.push(limit, offset);
+
+    // Execute main query
+    const { rows } = await pool.query(baseQuery, params);
+
+    // === Get total count for pagination info ===
+    let countQuery = `SELECT COUNT(*) FROM rm_issue_register r WHERE 1=1`;
+    const countParams = [];
+    let countIndex = 1;
+
+    if (indent_id) {
+      countQuery += ` AND r.indent_no = $${countIndex++}`;
+      countParams.push(indent_id);
+    }
+    if (raw_material_id) {
+      countQuery += ` AND r.raw_material_id = $${countIndex++}`;
+      countParams.push(raw_material_id);
+    }
+    if (search) {
+      countQuery += ` AND (LOWER(r.description) LIKE LOWER($${countIndex}) OR LOWER(r.remarks) LIKE LOWER($${countIndex}))`;
+      countParams.push(`%${search}%`);
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+    const totalRecords = parseInt(countResult.rows[0].count, 10);
+
+    // Add totalRecords inside each row
+    const dataWithTotal = rows.map((row) => ({
+      ...row,
+      total_records: totalRecords,
+    }));
+const pagination = {
+        totalRecords,
+        totalPages: Math.ceil(totalRecords / limit),
+        currentPage: Number(page),
+        limit: Number(limit),
+      }
+    return {
+      status: true,
+      message: "RM Issue Register fetched successfully.",
+      data: {data:dataWithTotal,pagination }
+    };
+  } catch (error) {
+    console.error("❌ Error in getAllIndentwisePurchaseHistory:", error);
     return {
       status: false,
       message: `Something went wrong. (${error.message})`,
