@@ -318,12 +318,12 @@ exports.updateIndentService = async (body, id, userId) => {
     if (!existingIndent.length)
       return { status: false, message: "Indent not found." };
 
-     // === Dynamically update only changed fields ===
+    // === Dynamically update only changed fields ===
     const updateFields = [];
     const updateValues = [];
     let idx = 1;
 
-      if (indent_no) {
+    if (indent_no) {
       updateFields.push(`indent_no = $${idx++}`);
       updateValues.push(indent_no);
     }
@@ -361,7 +361,7 @@ exports.updateIndentService = async (body, id, userId) => {
     await client.query("COMMIT");
 
 
-     return {
+    return {
       status: true,
       message: "Indent updated successfully with partial fields."
     };
@@ -432,5 +432,81 @@ exports.getIndentByIdService = async (id) => {
       data: null,
       message: error.message || 'Something went wrong while fetching indent',
     };
+  }
+};
+
+exports.getAllRawMaterialsWithindentwise = async (params,query) => {
+  try {
+    const { indent_id } = params;
+    const { page = 1, limit = 10 } = query
+
+    if (!indent_id) {
+      return { status: false, message: "indent_id is required" };
+    }
+
+    // Convert page/limit to numbers and calculate offset
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 10;
+    const offset = (pageNum - 1) * limitNum;
+
+    // Main query with pagination
+    const indentQry = `
+      SELECT 
+        i.id AS indent_id,
+        i.indent_no,
+        i.indent_date,
+        i.status,
+        i.remarks,
+
+        ii.id AS indent_item_id,
+        ii.weight,
+        ii.unit,
+        ii.rate,
+        ii.value,
+
+        rm.id AS raw_material_id,
+        rm.code AS raw_material_code,
+        rm.name AS raw_material_name,
+        rm.uom AS raw_material_uom,
+        rm.category AS raw_material_category,
+        rm.batchable,
+        rm.reorder_level,
+        rm.total_qty
+
+      FROM indents i
+      LEFT JOIN indent_items ii ON i.id = ii.indent_id
+      LEFT JOIN raw_materials rm ON ii.raw_material_id = rm.id
+      WHERE i.id = $1
+      ORDER BY rm.name ASC
+      LIMIT $2 OFFSET $3;
+    `;
+
+    // Total count (for pagination metadata)
+    const countQry = `
+      SELECT COUNT(*) AS total
+      FROM indent_items ii
+      WHERE ii.indent_id = $1;
+    `;
+
+    // Run both queries
+    const indentData = await sqlQueryFun(indentQry, [indent_id, limitNum, offset]);
+    const totalResult = await sqlQueryFun(countQry, [indent_id]);
+    const total = Number(totalResult[0]?.total || 0);
+    const totalPages = Math.ceil(total / limitNum);
+
+     const pagination = {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages,
+      }
+    return {
+      status: true,
+      message: "Raw materials fetched successfully",
+      data: {data:indentData,pagination}
+    };
+  } catch (error) {
+    console.error("Error in getAllRawMaterialsWithindentwise:", error);
+    return { status: false, message: `Something went wrong (${error.message})` };
   }
 };
