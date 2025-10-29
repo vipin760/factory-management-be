@@ -32,11 +32,4 @@ exports.updateIndent = catchAsync( async(req ,res ,next)=>{
     return res.status(200).send({status,data,message})
 })
 
-exports.getAllRawMaterialsWithindentwiseController = catchAsync( async(req ,res ,next)=>{
-    const {status, data, message} = await indentServices.getAllRawMaterialsWithindentwise(req.params,req.query)
-    if(!status) return next(new ErrorHandler(message,400));
-    const { response, total, page, limit } = data
-    return res.status(200).send({status,data,message})
-})
-
 

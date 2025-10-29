@@ -1,4 +1,5 @@
 const { pool } = require("../config/database");
+const { sqlQueryFun } = require("../database/sql/sqlFunction");
 
 // unit_name chair unit
 // department_name : Manufactory Store Keeper
@@ -38,8 +39,8 @@ exports.createUnitMaster = async (userId, body) => {
             }
         }
 
-         await client.query('COMMIT');
-        return { status: true, data:result, message: "Unit master created successfully" };
+        await client.query('COMMIT');
+        return { status: true, data: result, message: "Unit master created successfully" };
     } catch (error) {
         await client.query('ROLLBACK');
         return { status: false, message: `Something went wrong. (${error.message})` };
@@ -121,13 +122,13 @@ exports.getUnitMaster = async (query) => {
         const result = {
             status: true,
             totalRecords,                    // total number of records matching the query
-            totalPages:limit === "all"? 1 : Math.ceil(totalRecords / parseInt(limit)) ,                       // total number of pages
+            totalPages: limit === "all" ? 1 : Math.ceil(totalRecords / parseInt(limit)),                       // total number of pages
             currentPage: limit === "all" ? 1 : parseInt(page) || 1, // current page
             limit: limit === "all" ? totalRecords : parseInt(limit), // actual limit applied                       // array of records
         };
         return {
             status: true,
-            data:{data: units  ,paginationData:result},
+            data: { data: units, paginationData: result },
             message: "total unit fetch successfully"
         };
     } catch (error) {
@@ -299,6 +300,98 @@ exports.updateUnitMaster = async (unit_id, body, userId) => {
         client.release();
     }
 };
+
+
+exports.getAllRawMaterialsWithUnitwise = async (query) => {
+  try {
+    const { unit_id, page = 1, limit = 10, sort_by = "rm.name", sort_order = "ASC" } = query;
+
+    // ✅ Validation
+    if (!unit_id) {
+      return { status: false, message: "unit_id is required" };
+    }
+
+    // ✅ Pagination setup
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 10;
+    const offset = (pageNum - 1) * limitNum;
+
+    // ✅ Sorting validation (prevent SQL injection)
+    const validSortColumns = ["rm.name", "rm.code", "rm.category", "u.unit_name"];
+    const sortColumn = validSortColumns.includes(sort_by) ? sort_by : "rm.name";
+    const order = sort_order.toUpperCase() === "DESC" ? "DESC" : "ASC";
+
+    // ✅ Main query with pagination and sorting
+    const unitQry = `
+      SELECT 
+        u.id AS unit_id,
+        u.unit_name,
+        u.department_name,
+        u.purpose,
+        u.shop_name,
+        u.product_name,
+
+        umi.id AS unit_item_id,
+        umi.created_at AS item_created_at,
+
+        rm.id AS raw_material_id,
+        rm.code AS raw_material_code,
+        rm.name AS raw_material_name,
+        rm.description AS raw_material_description,
+        rm.uom AS raw_material_uom,
+        rm.category AS raw_material_category,
+        rm.batchable,
+        rm.reorder_level,
+        rm.total_qty
+
+      FROM unit_master u
+      LEFT JOIN unit_master_items umi ON u.id = umi.unit_master_id
+      LEFT JOIN raw_materials rm ON umi.raw_material_id = rm.id
+      WHERE u.id = $1
+      ORDER BY ${sortColumn} ${order}
+      LIMIT $2 OFFSET $3;
+    `;
+
+    // ✅ Count query for total records
+    const countQry = `
+      SELECT COUNT(*) AS total
+      FROM unit_master_items
+      WHERE unit_master_id = $1;
+    `;
+
+    // ✅ Execute both queries concurrently
+    const [unitData, totalResult] = await Promise.all([
+      sqlQueryFun(unitQry, [unit_id, limitNum, offset]),
+      sqlQueryFun(countQry, [unit_id]),
+    ]);
+
+    const total = Number(totalResult[0]?.total || 0);
+    const totalPages = Math.ceil(total / limitNum);
+
+    // ✅ Final structured response
+    return {
+      status: true,
+      message: "Raw materials fetched successfully (unit-wise)",
+      data: {
+        unitData,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          totalPages,
+        },
+      },
+    };
+  } catch (error) {
+    console.error("Error in getAllRawMaterialsWithUnitwise:", error);
+    return {
+      status: false,
+      message: `Something went wrong (${error.message})`,
+    };
+  }
+};
+
+
 
 
 

@@ -9,6 +9,5 @@ routes.get("/",authorizeRoles("admin","productionsupervisor"),indentController.g
 routes.delete("/:id",authorizeRoles("admin"),indentController.deleteIndent);
 routes.put("/:id",authorizeRoles("admin"),indentController.updateIndent);
 routes.get("/:id",authorizeRoles("admin","productionsupervisor"),indentController.getByIndentId);
-routes.get("/:indent_id/raw-materials",authorizeRoles("admin","productionsupervisor"),indentController.getAllRawMaterialsWithindentwiseController);
 
 module.exports = routes
