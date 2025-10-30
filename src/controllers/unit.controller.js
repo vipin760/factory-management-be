@@ -29,6 +29,13 @@ exports.updateUnitMaster = catchAsync( async(req ,res ,next)=>{
 exports.getAllRawMaterialsWithindentwiseController = catchAsync( async(req ,res ,next)=>{
     const {status, data, message} = await unitMasterServices.getAllRawMaterialsWithUnitwise(req.query)
     if(!status) return next(new ErrorHandler(message,400));
-    const { response, total, page, limit } = data
-    return res.status(200).send({status,data,message})
+    const { unitData, pagination } = data
+    //  unitData,
+    //     pagination: {
+    //       total,
+    //       page: pageNum,
+    //       limit: limitNum,
+    //       totalPages,
+    //     }
+    return res.status(200).send({status,data:unitData,pagination,message})
 })

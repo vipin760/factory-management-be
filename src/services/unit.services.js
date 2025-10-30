@@ -320,7 +320,6 @@ exports.getAllRawMaterialsWithUnitwise = async (query) => {
     const validSortColumns = ["rm.name", "rm.code", "rm.category", "u.unit_name"];
     const sortColumn = validSortColumns.includes(sort_by) ? sort_by : "rm.name";
     const order = sort_order.toUpperCase() === "DESC" ? "DESC" : "ASC";
-
     // ✅ Main query with pagination and sorting
     const unitQry = `
       SELECT 
@@ -334,15 +333,16 @@ exports.getAllRawMaterialsWithUnitwise = async (query) => {
         umi.id AS unit_item_id,
         umi.created_at AS item_created_at,
 
-        rm.id AS raw_material_id,
-        rm.code AS raw_material_code,
-        rm.name AS raw_material_name,
-        rm.description AS raw_material_description,
-        rm.uom AS raw_material_uom,
-        rm.category AS raw_material_category,
+        rm.id,
+        rm.code,
+        rm.name,
+        rm.description ,
+        rm.uom,
+        rm.category ,
         rm.batchable,
         rm.reorder_level,
-        rm.total_qty
+        rm.total_qty,
+        rm.created_at
 
       FROM unit_master u
       LEFT JOIN unit_master_items umi ON u.id = umi.unit_master_id
