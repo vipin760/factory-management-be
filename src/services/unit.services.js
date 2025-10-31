@@ -322,66 +322,58 @@ exports.getAllRawMaterialsWithUnitwise = async (query) => {
     const order = sort_order.toUpperCase() === "DESC" ? "DESC" : "ASC";
     // ✅ Main query with pagination and sorting
     const unitQry = `
-      SELECT 
-        u.id AS unit_id,
-        u.unit_name,
-        u.department_name,
-        u.purpose,
-        u.shop_name,
-        u.product_name,
+  SELECT 
+    rm.id,
+    rm.code,
+    rm.name,
+    rm.description,
+    rm.uom,
+    rm.category,
+    rm.batchable,
+    rm.reorder_level,
+    rm.total_qty,
+    rm.created_at
+  FROM unit_master u
+  LEFT JOIN unit_master_items umi ON u.id = umi.unit_master_id
+  LEFT JOIN raw_materials rm ON umi.raw_material_id = rm.id
+  WHERE u.id = $1
+  ORDER BY ${sortColumn} ${order}
+  LIMIT $2 OFFSET $3;
+`;
 
-        umi.id AS unit_item_id,
-        umi.created_at AS item_created_at,
+// ✅ Count query for total records
+const countQry = `
+  SELECT COUNT(*) AS total
+  FROM unit_master_items
+  WHERE unit_master_id = $1;
+`;
 
-        rm.id,
-        rm.code,
-        rm.name,
-        rm.description ,
-        rm.uom,
-        rm.category ,
-        rm.batchable,
-        rm.reorder_level,
-        rm.total_qty,
-        rm.created_at
+// ✅ Execute both queries concurrently
+const [unitData, totalResult] = await Promise.all([
+  sqlQueryFun(unitQry, [unit_id, limitNum, offset]),
+  sqlQueryFun(countQry, [unit_id]),
+]);
 
-      FROM unit_master u
-      LEFT JOIN unit_master_items umi ON u.id = umi.unit_master_id
-      LEFT JOIN raw_materials rm ON umi.raw_material_id = rm.id
-      WHERE u.id = $1
-      ORDER BY ${sortColumn} ${order}
-      LIMIT $2 OFFSET $3;
-    `;
+const total = Number(totalResult[0]?.total || 0);
+const totalPages = Math.ceil(total / limitNum);
 
-    // ✅ Count query for total records
-    const countQry = `
-      SELECT COUNT(*) AS total
-      FROM unit_master_items
-      WHERE unit_master_id = $1;
-    `;
-
-    // ✅ Execute both queries concurrently
-    const [unitData, totalResult] = await Promise.all([
-      sqlQueryFun(unitQry, [unit_id, limitNum, offset]),
-      sqlQueryFun(countQry, [unit_id]),
-    ]);
-
-    const total = Number(totalResult[0]?.total || 0);
-    const totalPages = Math.ceil(total / limitNum);
-
-    // ✅ Final structured response
-    return {
-      status: true,
-      message: "Raw materials fetched successfully (unit-wise)",
-      data: {
-        unitData,
-        pagination: {
-          total,
-          page: pageNum,
-          limit: limitNum,
-          totalPages,
-        },
-      },
-    };
+// ✅ Final structured response
+const cleanData = (unitData || []).filter(row =>
+  Object.values(row).some(value => value !== null)
+);
+return {
+  status: true,
+  message: "Raw materials fetched successfully (unit-wise)",
+  data: {
+    unitData:cleanData.length ? cleanData : [], 
+    pagination: {
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages,
+    },
+  },
+};
   } catch (error) {
     console.error("Error in getAllRawMaterialsWithUnitwise:", error);
     return {

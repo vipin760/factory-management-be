@@ -269,6 +269,31 @@ CREATE TABLE IF NOT EXISTS rm_issue_register (
     updated_at TIMESTAMP DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS manufacture_articles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  article_name TEXT NOT NULL,
+  remarks TEXT,
+  created_by UUID REFERENCES users(id),
+  updated_by UUID REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS transit_register (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  manufacture_articles_id UUID REFERENCES manufacture_articles(id) ON DELETE CASCADE NOT NULL,
+  transit_date DATE NOT NULL,                           -- Replaces 'date'
+  production_name VARCHAR(255),                         -- Replaces 'name_of_the_production'
+ indent_id UUID REFERENCES indents(id) ON DELETE CASCADE,                               -- Indent number reference
+  quantity NUMERIC(10,2),                               -- Replaces 'qty'
+  unit VARCHAR(50),                                     -- Measurement unit
+  store_keeper_approval BOOLEAN DEFAULT FALSE,          -- Storekeeper approval status
+  jailor_approval BOOLEAN DEFAULT FALSE,                -- Jailor approval status
+  superintendent_approval BOOLEAN DEFAULT FALSE,        -- Superintendent approval status
+  created_at TIMESTAMP DEFAULT NOW(),                   -- Record creation timestamp
+  updated_at TIMESTAMP DEFAULT NOW()                    -- Record update timestamp
+);
+
 `);
 
     //     await pool.query(`
