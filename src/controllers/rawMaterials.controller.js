@@ -41,3 +41,4 @@ exports.fetchRawMaterialBatches = catchAsync( async(req ,res ,next)=>{
     const { response, total, page, limit } = data
     return res.status(200).send({status,data:response,total,limit,page,message})
 })
+
