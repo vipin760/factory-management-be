@@ -205,7 +205,7 @@ exports.createCustomerOrders = async (body, userId) => {
     }
 };
 
-exports.getCustomerOrders = async (query) => {
+exports.getCustomerOrders1 = async (query) => {
     const client = await pool.connect();
 
     try {
@@ -341,6 +341,166 @@ exports.getCustomerOrders = async (query) => {
     }
 };
 
+exports.getCustomerOrders = async (query) => {
+    const client = await pool.connect();
+
+    try {
+        let {
+            page = 1,
+            limit = 10,
+            search = "",
+            status,
+            start_date,
+            end_date,
+            so_no,
+            sort_by = "created_at",
+            sort_type = "DESC",
+        } = query;
+
+        page = parseInt(page);
+        limit = limit === "all" ? "all" : parseInt(limit);
+
+        // -----------------------------
+        // Build dynamic WHERE clauses
+        // -----------------------------
+        const whereClauses = ["1=1"];
+        const values = [];
+        let idx = 1;
+
+        if (search) {
+            whereClauses.push(
+                `(LOWER(customer_name) LIKE LOWER($${idx}) OR LOWER(so_no) LIKE LOWER($${idx}))`
+            );
+            values.push(`%${search}%`);
+            idx++;
+        }
+
+        if (status) {
+            whereClauses.push(`status = $${idx}`);
+            values.push(status);
+            idx++;
+        }
+
+        if (start_date) {
+            whereClauses.push(`order_date >= $${idx}`);
+            values.push(start_date);
+            idx++;
+        }
+
+        if (end_date) {
+            whereClauses.push(`order_date <= $${idx}`);
+            values.push(end_date);
+            idx++;
+        }
+
+        if (so_no) {
+            whereClauses.push(`so_no = $${idx}`);
+            values.push(so_no);
+            idx++;
+        }
+
+        const whereQuery = `WHERE ${whereClauses.join(" AND ")}`;
+
+        // -----------------------------
+        // Sorting
+        // -----------------------------
+        const allowedSort = [
+            "customer_name",
+            "so_no",
+            "order_date",
+            "status",
+            "created_at",
+            "ordered_qty",
+        ];
+
+        const orderColumn = allowedSort.includes(sort_by) ? sort_by : "created_at";
+        const orderDirection = sort_type.toUpperCase() === "ASC" ? "ASC" : "DESC";
+
+        // -----------------------------
+        // Pagination
+        // -----------------------------
+        const offset = (page - 1) * (limit === "all" ? 0 : limit);
+        const paginationQuery = limit === "all" ? "" : `LIMIT ${limit} OFFSET ${offset}`;
+
+        // -----------------------------
+        // Main query with dispatch summary
+        // -----------------------------
+        // const dataQuery = `
+        //     SELECT 
+        //         co.*,
+        //         COALESCE(SUM(d.transfered_qty), 0) AS total_transferred_qty
+        //     FROM customer_orders co
+        //     LEFT JOIN dispatch_orders d 
+        //         ON co.id = d.customer_orders_id
+        //     ${whereQuery}
+        //     GROUP BY co.id
+        //     ORDER BY ${orderColumn} ${orderDirection}
+        //     ${paginationQuery};
+        // `;
+
+        const dataQuery = `SELECT 
+    co.*,
+    ma.article_name,
+    ma.remarks AS article_remarks,
+    COALESCE(SUM(d.transfered_qty), 0) AS total_transferred_qty
+FROM customer_orders co
+LEFT JOIN dispatch_orders d 
+    ON co.id = d.customer_orders_id
+LEFT JOIN transit_register tr
+    ON tr.id = co.transit_register_id
+LEFT JOIN manufacture_articles ma
+    ON ma.id = tr.manufacture_articles_id
+${whereQuery}
+GROUP BY 
+    co.id, 
+    ma.article_name, 
+    ma.remarks
+ORDER BY ${orderColumn} ${orderDirection}
+${paginationQuery};
+`
+
+        // -----------------------------
+        // Count query
+        // -----------------------------
+        const countQuery = `
+            SELECT COUNT(*) AS total_records
+            FROM customer_orders co
+            ${whereQuery};
+        `;
+
+        const [dataResult, countResult] = await Promise.all([
+            client.query(dataQuery, values),
+            client.query(countQuery, values),
+        ]);
+
+        const totalRecords = parseInt(countResult.rows[0]?.total_records || 0);
+
+        const pagination =
+            limit === "all"
+                ? null
+                : {
+                    total_records: totalRecords,
+                    current_page: page,
+                    total_pages: Math.ceil(totalRecords / limit),
+                    limit: limit,
+                };
+
+        return {
+            status: true,
+            message: "Customer Orders fetched successfully",
+            data: { data: dataResult.rows, pagination },
+        };
+    } catch (error) {
+        console.error("❌ Error in getCustomerOrders:", error);
+        return {
+            status: false,
+            message: `Something went wrong (${error.message})`,
+        };
+    } finally {
+        client.release();
+    }
+};
+
 exports.deleteCustomerOrder = async (orderId) => {
     const client = await pool.connect();
 
@@ -382,23 +542,59 @@ exports.deleteCustomerOrder = async (orderId) => {
     }
 };
 
+exports.getCustomerOrderById = async (orderId) => {
+    const client = await pool.connect();
+
+    try {
+        await client.query("BEGIN");
+
+        // Check order exists
+        const order = await client.query(
+            `SELECT * FROM customer_orders WHERE id = $1`,
+            [orderId]
+        );
+
+        if (!order.rows.length) {
+            await client.query("ROLLBACK");
+            return { status: false, message: "Customer order not found" };
+        }
+
+        await client.query("COMMIT");
+
+        return {
+            status: true,
+            data: order.rows[0],
+            message: "Customer Order fetch successfully"
+        };
+
+    } catch (error) {
+        await client.query("ROLLBACK");
+        return {
+            status: false,
+            message: `Something went wrong (${error.message})`
+        };
+    } finally {
+        client.release();
+    }
+};
+
 exports.updateCustomerOrder = async (body, orderId, userId) => {
     const client = await pool.connect();
-     //---------------------------------------------------------
-        // DESTRUCTURE PAYLOAD
-        //---------------------------------------------------------
-        const {
-            so_no,
-            customer_name,
-            customer_address,
-            ordered_qty,
-            rate,
-            order_date,
-            due_date,
-            notes,
-            transfered_qty,
-            return_qty
-        } = body;
+    //---------------------------------------------------------
+    // DESTRUCTURE PAYLOAD
+    //---------------------------------------------------------
+    const {
+        so_no,
+        customer_name,
+        customer_address,
+        ordered_qty,
+        rate,
+        order_date,
+        due_date,
+        notes,
+        transfered_qty,
+        return_qty
+    } = body;
     try {
         await client.query("BEGIN");
 
@@ -437,8 +633,8 @@ exports.updateCustomerOrder = async (body, orderId, userId) => {
         const finalUsedQty = totalDispatched - totalReturned;
         const remainingQty = order.ordered_qty - finalUsedQty;
 
-          //---------------------------------------------------------
-         // CHECK TRANSIT REGISTER VALIDITY
+        //---------------------------------------------------------
+        // CHECK TRANSIT REGISTER VALIDITY
         // ------------------------- 
         const { transit_register_id } = order
         const transit_registerData = await client.query(
@@ -613,13 +809,128 @@ exports.updateCustomerOrder = async (body, orderId, userId) => {
     }
 };
 
+exports.transferOrReturnCustomerOrder = async (body, userId) => {
+    const client = await pool.connect();
+    try {
+        const { customer_order_id, transfered_qty = 0, return_qty = 0 } = body;
 
+        if (!customer_order_id)
+            return { status: false, message: "customer_order_id is required" };
 
+        await client.query("BEGIN");
 
+        // -------------------------
+        // Fetch customer order & transit register
+        // -------------------------
+        const orderRes = await client.query(
+            `SELECT co.*, tr.quantity AS transit_quantity
+             FROM customer_orders co
+             JOIN transit_register tr ON co.transit_register_id = tr.id
+             WHERE co.id = $1`,
+            [customer_order_id]
+        );
 
+        if (orderRes.rows.length === 0) {
+            await client.query("ROLLBACK");
+            return { status: false, message: "Customer order not found" };
+        }
 
+        const order = orderRes.rows[0];
 
+        // -------------------------
+        // Calculate dispatched & returned
+        // -------------------------
+        const qtyResult = await client.query(
+            `
+            SELECT 
+                COALESCE(SUM(CASE WHEN return_status = FALSE THEN transfered_qty END),0) AS total_dispatched,
+                COALESCE(SUM(CASE WHEN return_status = TRUE THEN transfered_qty END),0) AS total_returned
+            FROM dispatch_orders
+            WHERE customer_orders_id = $1
+            `,
+            [customer_order_id]
+        );
 
+        const totalDispatched = parseInt(qtyResult.rows[0].total_dispatched);
+        const totalReturned = parseInt(qtyResult.rows[0].total_returned);
 
+        const finalUsedQty = totalDispatched - totalReturned;
+        const remainingQty = order.ordered_qty - finalUsedQty;
 
+        // -------------------------
+        // Handle transfer
+        // -------------------------
+        let transferQtyNum = parseInt(transfered_qty) || 0;
+        if (transferQtyNum > 0) {
+            if (transferQtyNum > remainingQty) {
+                await client.query("ROLLBACK");
+                return {
+                    status: false,
+                    message: `Cannot transfer ${transferQtyNum}. Only ${remainingQty} remaining`
+                };
+            }
+
+            await client.query(
+                `INSERT INTO dispatch_orders
+                 (customer_orders_id, transfered_qty, return_status, created_by)
+                 VALUES ($1, $2, FALSE, $3)`,
+                [customer_order_id, transferQtyNum, userId]
+            );
+        }
+
+        // -------------------------
+        // Handle return
+        // -------------------------
+        let returnQtyNum = parseInt(return_qty) || 0;
+        if (returnQtyNum > 0) {
+            if (returnQtyNum > finalUsedQty) {
+                await client.query("ROLLBACK");
+                return {
+                    status: false,
+                    message: `Cannot return ${returnQtyNum}. Only ${finalUsedQty} has been transferred`
+                };
+            }
+
+            await client.query(
+                `INSERT INTO dispatch_orders
+                 (customer_orders_id, transfered_qty, return_status, created_by)
+                 VALUES ($1, $2, TRUE, $3)`,
+                [customer_order_id, returnQtyNum, userId]
+            );
+        }
+
+        // -------------------------
+        // Update order status
+        // -------------------------
+        const newFinalUsed = finalUsedQty + transferQtyNum - returnQtyNum;
+        let newStatus = "PENDING";
+        if (newFinalUsed === 0) newStatus = "PENDING";
+        else if (newFinalUsed < order.ordered_qty) newStatus = "PARTIAL";
+        else if (newFinalUsed >= order.ordered_qty) newStatus = "COMPLETED";
+
+        await client.query(
+            `UPDATE customer_orders SET status = $1 WHERE id = $2`,
+            [newStatus, customer_order_id]
+        );
+
+        await client.query("COMMIT");
+
+        return {
+            status: true,
+            message: "Transfer/Return processed successfully",
+            data: {
+                customer_order_id,
+                transferred_qty: transferQtyNum,
+                returned_qty: returnQtyNum,
+                new_status: newStatus
+            }
+        };
+    } catch (error) {
+        await client.query("ROLLBACK");
+        console.error(error);
+        return { status: false, message: `Something went wrong (${error.message})` };
+    } finally {
+        client.release();
+    }
+};
 

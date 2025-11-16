@@ -144,7 +144,7 @@ exports.createTransitRegisterService = async (body) => {
     }
 };
 
-exports.getAllTransitRegisterService = async (query) => {
+exports.getAllTransitRegisterService1 = async (query) => {
     const client = await pool.connect();
     try {
         const {
@@ -275,6 +275,174 @@ exports.getAllTransitRegisterService = async (query) => {
             message: "Transit register data fetched successfully",
             data: { data: recordsData, pagination }
             ,
+        };
+    } catch (error) {
+        console.error("❌ Error in getAllTransitRegisterService:", error);
+        return { status: false, message: `Something went wrong (${error.message})` };
+    } finally {
+        client.release();
+    }
+};
+
+exports.getAllTransitRegisterService = async (query) => {
+    const client = await pool.connect();
+    try {
+        const {
+            search = "",
+            sortBy = "created_at",
+            sortOrder = "DESC",
+            page = 1,
+            limit = 10,
+            start_date,
+            end_date,
+            store_keeper_approval,
+            jailor_approval,
+            superintendent_approval,
+            manufacture_articles_id,
+        } = query;
+
+        // -----------------------------
+        // Build dynamic WHERE clauses
+        // -----------------------------
+        const whereClauses = [];
+        const values = [];
+        let idx = 1;
+
+        if (search) {
+            whereClauses.push(
+                `(LOWER(tr.production_name) LIKE LOWER($${idx}) OR LOWER(ma.article_name) LIKE LOWER($${idx}))`
+            );
+            values.push(`%${search}%`);
+            idx++;
+        }
+
+        if (manufacture_articles_id) {
+            whereClauses.push(`tr.manufacture_articles_id = $${idx}`);
+            values.push(manufacture_articles_id);
+            idx++;
+        }
+
+        if (store_keeper_approval !== undefined) {
+            whereClauses.push(`tr.store_keeper_approval = $${idx}`);
+            values.push(store_keeper_approval === "true");
+            idx++;
+        }
+        if (jailor_approval !== undefined) {
+            whereClauses.push(`tr.jailor_approval = $${idx}`);
+            values.push(jailor_approval === "true");
+            idx++;
+        }
+        if (superintendent_approval !== undefined) {
+            whereClauses.push(`tr.superintendent_approval = $${idx}`);
+            values.push(superintendent_approval === "true");
+            idx++;
+        }
+
+        if (start_date && end_date) {
+            whereClauses.push(`tr.transit_date BETWEEN $${idx} AND $${idx + 1}`);
+            values.push(start_date, end_date);
+            idx += 2;
+        }
+
+        const whereQuery = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+        // -----------------------------
+        // Sorting
+        // -----------------------------
+        const validSortColumns = [
+            "transit_date",
+            "production_name",
+            "quantity",
+            "created_at",
+        ];
+        const orderColumn = validSortColumns.includes(sortBy) ? sortBy : "created_at";
+        const orderDirection = sortOrder.toUpperCase() === "ASC" ? "ASC" : "DESC";
+
+        // -----------------------------
+        // Pagination
+        // -----------------------------
+        let paginationQuery = "";
+        const limitValue = limit === "all" ? null : parseInt(limit);
+        const offsetValue = (parseInt(page) - 1) * parseInt(limit);
+
+        if (limitValue && limitValue > 0) {
+            paginationQuery = `LIMIT ${limitValue} OFFSET ${offsetValue}`;
+        }
+
+        // -----------------------------
+        // Main query
+        // -----------------------------
+        // const dataQuery = `
+        //     SELECT 
+        //         tr.*, 
+        //         ma.article_name,
+        //         ma.remarks AS article_remarks
+        //     FROM transit_register tr
+        //     LEFT JOIN manufacture_articles ma ON ma.id = tr.manufacture_articles_id
+        //     ${whereQuery}
+        //     ORDER BY ${orderColumn} ${orderDirection}
+        //     ${paginationQuery};
+        // `;
+        const dataQuery = `SELECT 
+    tr.*,
+    ma.article_name,
+    ma.remarks AS article_remarks,
+
+    -- Calculate remaining qty
+    (
+        tr.quantity -
+        COALESCE((
+            SELECT SUM(d.transfered_qty)
+            FROM customer_orders co
+            LEFT JOIN dispatch_orders d ON d.customer_orders_id = co.id
+            WHERE co.transit_register_id = tr.id
+              AND d.return_status = FALSE
+        ), 0)
+    ) AS remaining_qty
+
+FROM transit_register tr
+LEFT JOIN manufacture_articles ma ON ma.id = tr.manufacture_articles_id
+${whereQuery}
+ORDER BY ${orderColumn} ${orderDirection}
+${paginationQuery};
+`
+
+        // -----------------------------
+        // Count query
+        // -----------------------------
+        const countQuery = `
+            SELECT COUNT(*) AS total_records
+            FROM transit_register tr
+            LEFT JOIN manufacture_articles ma ON ma.id = tr.manufacture_articles_id
+            ${whereQuery};
+        `;
+
+        const [dataResult, countResult] = await Promise.all([
+            client.query(dataQuery, values),
+            client.query(countQuery, values),
+        ]);
+
+        const totalRecords = parseInt(countResult.rows[0]?.total_records || 0);
+
+        const recordsData = dataResult.rows.map((item) => ({
+            ...item,
+            total_records: totalRecords,
+        }));
+
+        const pagination =
+            limit === "all"
+                ? null
+                : {
+                      total_records: totalRecords,
+                      current_page: parseInt(page),
+                      total_pages: Math.ceil(totalRecords / limitValue),
+                      limit: limitValue,
+                  };
+
+        return {
+            status: true,
+            message: "Transit register data fetched successfully",
+            data: { data: recordsData, pagination },
         };
     } catch (error) {
         console.error("❌ Error in getAllTransitRegisterService:", error);
