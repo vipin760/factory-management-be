@@ -116,7 +116,6 @@ exports.createCustomerOrders = async (body, userId) => {
         // -------------------------
         // Validate transfer qty
         // -------------------------
-        console.log(parseInt(availableQty), ordered_qty);
         if (parseFloat(ordered_qty) > parseFloat(availableQty)) {
             return {
                 status: false,
@@ -385,6 +384,21 @@ exports.deleteCustomerOrder = async (orderId) => {
 
 exports.updateCustomerOrder = async (body, orderId, userId) => {
     const client = await pool.connect();
+     //---------------------------------------------------------
+        // DESTRUCTURE PAYLOAD
+        //---------------------------------------------------------
+        const {
+            so_no,
+            customer_name,
+            customer_address,
+            ordered_qty,
+            rate,
+            order_date,
+            due_date,
+            notes,
+            transfered_qty,
+            return_qty
+        } = body;
     try {
         await client.query("BEGIN");
 
@@ -423,21 +437,33 @@ exports.updateCustomerOrder = async (body, orderId, userId) => {
         const finalUsedQty = totalDispatched - totalReturned;
         const remainingQty = order.ordered_qty - finalUsedQty;
 
-        //---------------------------------------------------------
-        // 3. DESTRUCTURE PAYLOAD
-        //---------------------------------------------------------
-        const {
-            so_no,
-            customer_name,
-            customer_address,
-            ordered_qty,
-            rate,
-            order_date,
-            due_date,
-            notes,
-            transfered_qty,
-            return_qty
-        } = body;
+          //---------------------------------------------------------
+         // CHECK TRANSIT REGISTER VALIDITY
+        // ------------------------- 
+        const { transit_register_id } = order
+        const transit_registerData = await client.query(
+            `SELECT * FROM transit_register WHERE id = $1`,
+            [transit_register_id]
+        );
+
+        if (!transit_registerData.rows.length) {
+            await client.query("ROLLBACK");
+            return {
+                status: false,
+                message: "Transit register not found. Contact admin."
+            };
+        }
+
+        const availableQty = transit_registerData.rows[0].quantity;
+
+
+
+        if (parseFloat(ordered_qty) > parseFloat(availableQty)) {
+            return {
+                status: false,
+                message: "Ordered quantity cannot be greater than produced quantity"
+            };
+        }
 
         //---------------------------------------------------------
         // 4. SO_NO DUPLICATE CHECK
@@ -458,108 +484,113 @@ exports.updateCustomerOrder = async (body, orderId, userId) => {
         }
 
         //---------------------------------------------------------
-        // 5. DYNAMIC UPDATE
+        // 5. DYNAMIC UPDATE OF CUSTOMER ORDER
         //---------------------------------------------------------
         const fields = [];
         const values = [];
         let idx = 1;
 
-        const addField = (column, value) => {
-            if (value !== undefined && value !== null) {
-                fields.push(`${column} = $${idx}`);
-                values.push(value);
+        // Only add fields if they exist in the body
+        const updatableFields = [
+            "so_no",
+            "customer_name",
+            "customer_address",
+            "ordered_qty",
+            "rate",
+            "order_date",
+            "due_date",
+            "notes",
+            "status"
+        ];
+
+        updatableFields.forEach((field) => {
+            if (body[field] !== undefined && body[field] !== null) {
+                fields.push(`${field} = $${idx}`);
+                values.push(body[field]);
                 idx++;
             }
-        };
-
-        addField("so_no", so_no);
-        addField("customer_name", customer_name);
-        addField("customer_address", customer_address);
-        addField("ordered_qty", ordered_qty);
-        addField("rate", rate);
-        addField("order_date", order_date);
-        addField("due_date", due_date);
-        addField("notes", notes);
+        });
 
         if (fields.length > 0) {
             const updateQuery = `
-                UPDATE customer_orders
-                SET ${fields.join(", ")}
-                WHERE id = $${idx}
-            `;
+        UPDATE customer_orders
+        SET ${fields.join(", ")}
+        WHERE id = $${idx}
+    `;
             values.push(orderId);
             await client.query(updateQuery, values);
         }
 
+
         //---------------------------------------------------------
         // 6. HANDLE RETURN QTY (manual returns)
         //---------------------------------------------------------
-        const returnQtyNum = Number(return_qty) || 0;
+        // const returnQtyNum = Number(return_qty) || 0;
 
-        if (returnQtyNum > 0) {
-            await client.query(
-                `
-                INSERT INTO dispatch_orders
-                (customer_orders_id, transfered_qty, return_status, created_by)
-                VALUES ($1, $2, TRUE, $3)
-                `,
-                [orderId, returnQtyNum, userId]
-            );
-        }
+        // if (returnQtyNum > 0) {
+        //     await client.query(
+        //         `
+        //         INSERT INTO dispatch_orders
+        //         (customer_orders_id, transfered_qty, return_status, created_by)
+        //         VALUES ($1, $2, TRUE, $3)
+        //         `,
+        //         [orderId, returnQtyNum, userId]
+        //     );
+        // }
 
         //---------------------------------------------------------
         // 7. HANDLE TRANSFER QTY (with automatic return for over-transfer)
         //---------------------------------------------------------
-        let transferQtyNum = Number(transfered_qty) || 0;
+        // let transferQtyNum = Number(transfered_qty) || 0;
 
-        if (transferQtyNum > 0) {
-            const totalAttempted = finalUsedQty + transferQtyNum;
-            let excessQty = 0;
+        // if (transferQtyNum > 0) {
+        //     const totalAttempted = finalUsedQty + transferQtyNum;
+        //     let excessQty = 0;
 
-            if (totalAttempted > order.ordered_qty) {
-                // Calculate excess quantity to return automatically
-                excessQty = totalAttempted - order.ordered_qty;
-                transferQtyNum = transferQtyNum - excessQty; // only allow correct transfer
-            }
+        //     if (totalAttempted > order.ordered_qty) {
+        //         // Calculate excess quantity to return automatically
+        //         excessQty = totalAttempted - order.ordered_qty;
+        //         transferQtyNum = transferQtyNum - excessQty; // only allow correct transfer
+        //     }
 
-            if (transferQtyNum > 0) {
-                await client.query(
-                    `
-                    INSERT INTO dispatch_orders
-                    (customer_orders_id, transfered_qty, return_status, created_by)
-                    VALUES ($1, $2, FALSE, $3)
-                    `,
-                    [orderId, transferQtyNum, userId]
-                );
-            }
+        //     if (transferQtyNum > 0) {
+        //         await client.query(
+        //             `
+        //             INSERT INTO dispatch_orders
+        //             (customer_orders_id, transfered_qty, return_status, created_by)
+        //             VALUES ($1, $2, FALSE, $3)
+        //             `,
+        //             [orderId, transferQtyNum, userId]
+        //         );
+        //     }
 
-            if (excessQty > 0) {
-                await client.query(
-                    `
-                    INSERT INTO dispatch_orders
-                    (customer_orders_id, transfered_qty, return_status, created_by)
-                    VALUES ($1, $2, TRUE, $3)
-                    `,
-                    [orderId, excessQty, userId]
-                );
-            }
-        }
+        //     if (excessQty > 0) {
+        //         await client.query(
+        //             `
+        //             INSERT INTO dispatch_orders
+        //             (customer_orders_id, transfered_qty, return_status, created_by)
+        //             VALUES ($1, $2, TRUE, $3)
+        //             `,
+        //             [orderId, excessQty, userId]
+        //         );
+        //     }
+        // }
 
         //---------------------------------------------------------
         // 8. AUTO STATUS UPDATE
         //---------------------------------------------------------
-        const newFinalUsed = finalUsedQty + transferQtyNum - returnQtyNum;
+        // const newFinalUsed = finalUsedQty + transferQtyNum - returnQtyNum;
 
-        let newStatus = "PENDING";
+        // let newStatus = "PENDING";
 
-        if (newFinalUsed === 0) newStatus = "PENDING";
-        else if (newFinalUsed < order.ordered_qty) newStatus = "PARTIAL";
-        else if (newFinalUsed >= order.ordered_qty) newStatus = "COMPLETED";
+        // if (newFinalUsed === 0) newStatus = "PENDING";
+        // else if (newFinalUsed < order.ordered_qty) newStatus = "PARTIAL";
+        // else if (newFinalUsed >= order.ordered_qty) newStatus = "COMPLETED";
 
-        await client.query(
-            `UPDATE customer_orders SET status = $1 WHERE id = $2`,
-            [newStatus, orderId]
-        );
+        // await client.query(
+        //     `UPDATE customer_orders SET status = $1 WHERE id = $2`,
+        //     [newStatus, orderId]
+        // );
 
         //---------------------------------------------------------
         // 9. COMMIT
@@ -569,11 +600,9 @@ exports.updateCustomerOrder = async (body, orderId, userId) => {
         return {
             status: true,
             message: "Customer order updated successfully",
-            updated_status: newStatus
         };
 
     } catch (error) {
-        console.log(error);
         await client.query("ROLLBACK");
         return {
             status: false,
