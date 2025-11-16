@@ -127,7 +127,6 @@ exports.createTransitRegisterService = async (body) => {
 
         const result = await client.query(insertQuery, insertValues);
         await client.query("COMMIT");
-
         return {
             status: true,
             message: "Transit record created successfully.",
@@ -144,7 +143,6 @@ exports.createTransitRegisterService = async (body) => {
         client.release();
     }
 };
-
 
 exports.getAllTransitRegisterService = async (query) => {
     const client = await pool.connect();
@@ -285,7 +283,6 @@ exports.getAllTransitRegisterService = async (query) => {
         client.release();
     }
 };
-
 
 exports.updateTransitRegisterService = async (id, body) => {
     const client = await pool.connect();
@@ -444,7 +441,6 @@ exports.updateTransitRegisterService = async (id, body) => {
     }
 };
 
-
 exports.deleteTransitRegisterService = async (id) => {
     const client = await pool.connect();
     try {
@@ -486,13 +482,11 @@ exports.deleteTransitRegisterService = async (id) => {
     }
 };
 
-
 exports.getTransitRegisterServiceById = async (id) => {
-    console.log("<><>id", id);
-
     const client = await pool.connect();
     try {
-
+        const data = await client.query(`SELECT * FROM transit_register WHERE id = $1`,[id]);
+        return { status:true,data}
     } catch (error) {
         console.error("❌ Error in getManufactureArticleServiceById:", error);
         return {

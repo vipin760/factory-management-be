@@ -33,6 +33,7 @@ const fileUploadRoutes = require('./routes/fileUpload.route')
 const unitRoutes = require('./routes/unit.route')
 const manufactureArticlesRoutes = require('./routes/manufactureArticle.route')
 const transitRegisterRoutes = require('./routes/transitRegister.routes')
+const customerOrderRoutes = require('./routes/customer.route');
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -56,6 +57,7 @@ app.use("/api/dashboard",dashboardRoutes)
 app.use("/api/unit",unitRoutes)
 app.use("/api/manufacture-articles",manufactureArticlesRoutes)
 app.use("/api/transit_register",transitRegisterRoutes)
+app.use("/api/customer-order",customerOrderRoutes)
 
 //error middleware
 app.use(errorMiddleare);

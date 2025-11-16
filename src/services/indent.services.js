@@ -41,13 +41,15 @@ exports.createIndentService = async (body, userId) => {
       const { raw_material_id, weight, article_name } = item;
 
       const rmRes = await client.query(
-        `SELECT total_qty FROM raw_materials WHERE id = $1`,
+        `SELECT total_qty, name FROM raw_materials WHERE id = $1`,
         [raw_material_id]
       );
+      const {total_qty,name} = rmRes.rows[0]
+console.log(name, total_qty);
 
       if (!rmRes.rows.length) {
         await client.query("ROLLBACK");
-        return { status: false, message: `Raw material not found for '${article_name}'.` };
+        return { status: false, message: `Raw material not found for '${name}'.` };
       }
 
       const availableQty = Number(rmRes.rows[0].total_qty || 0);
@@ -55,7 +57,7 @@ exports.createIndentService = async (body, userId) => {
         await client.query("ROLLBACK");
         return {
           status: false,
-          message: `Insufficient quantity for '${article_name}'. Available: ${availableQty}, Required: ${weight}`,
+          message: `Insufficient quantity for '${name}'. Available: ${availableQty}, Required: ${weight}`,
         };
       }
     }

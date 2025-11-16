@@ -28,7 +28,7 @@ async function startServer() {
         await createTablesIfNotExist();
 
         // Start the server
-        const server = app.listen(port, () => {
+        const server = app.listen(port,"0.0.0.0", () => {
             console.log(`Server connected on port ${port}`);
         });
 

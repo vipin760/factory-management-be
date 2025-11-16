@@ -294,6 +294,32 @@ CREATE TABLE IF NOT EXISTS transit_register (
   updated_at TIMESTAMP DEFAULT NOW()                    -- Record update timestamp
 );
 
+CREATE TABLE IF NOT EXISTS customer_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transit_register_id UUID REFERENCES transit_register(id) ON DELETE CASCADE NOT NULL,
+    so_no VARCHAR(50) NOT NULL UNIQUE,       -- Sales Order Number
+    order_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    customer_name TEXT NOT NULL,
+    customer_address TEXT,
+    ordered_qty INTEGER NOT NULL,
+    rate NUMERIC(10,2),
+    due_date DATE,
+    notes TEXT,
+    status VARCHAR(30) DEFAULT 'PENDING',     -- PENDING / PARTIAL / COMPLETED
+    created_at TIMESTAMP DEFAULT NOW(),
+    created_by UUID REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS dispatch_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    customer_orders_id UUID REFERENCES customer_orders(id) ON DELETE CASCADE NOT NULL,
+    transfered_qty INTEGER NOT NULL,
+    return_status BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    created_by UUID REFERENCES users(id)
+);
+
+
 `);
 
     //     await pool.query(`
