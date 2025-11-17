@@ -1,4 +1,5 @@
-const { pool } = require("../config/database")
+const { pool } = require("../config/database");
+const { sqlQueryFun } = require("../database/sql/sqlFunction");
 
 exports.createTransitRegisterService = async (body) => {
     const client = await pool.connect();
@@ -665,4 +666,152 @@ exports.getTransitRegisterServiceById = async (id) => {
     } finally {
         client.release();
     }
+};
+
+exports.getAllTransitRegisterHistoryById = async (query, id) => {
+  try {
+    if (!id) {
+      return { status: false, message: "Manufacture Article ID is required." };
+    }
+
+    let {
+      search = "",
+      sortBy = "tr.transit_date",
+      sortOrder = "DESC",
+      limit = 10,
+      page = 1
+    } = query;
+
+    limit = limit === "all" ? "all" : parseInt(limit);
+    page = parseInt(page);
+
+    const values = [id];
+    let paramIndex = 2;
+
+    // -----------------------------
+    // 🔍 SEARCH
+    // -----------------------------
+    let searchClause = "";
+    if (search) {
+      searchClause = `AND (
+          LOWER(tr.production_name) LIKE LOWER($${paramIndex}) OR
+          LOWER(ma.article_name) LIKE LOWER($${paramIndex})
+      )`;
+      values.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    // -----------------------------
+    // 📄 PAGINATION
+    // -----------------------------
+    let paginationClause = "";
+    if (limit !== "all") {
+      const offset = (page - 1) * limit;
+      paginationClause = `LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      values.push(limit, offset);
+      paramIndex += 2;
+    }
+
+    // -----------------------------
+    // 📌 QUERY
+    // -----------------------------
+    const queryStr = `
+      SELECT 
+        tr.id AS transit_id,
+        tr.transit_date,
+        tr.production_name,
+        tr.quantity,
+        tr.unit,
+        tr.indent_id,
+        tr.store_keeper_approval,
+        tr.jailor_approval,
+        tr.superintendent_approval,
+        tr.created_at,
+
+        ma.id AS article_id,
+        ma.article_name,
+        ma.remarks AS article_remarks,
+
+        -- Ordered qty used from customer orders
+        COALESCE((
+          SELECT SUM(co.ordered_qty)
+          FROM customer_orders co
+          WHERE co.transit_register_id = tr.id
+        ), 0) AS total_order_qty,
+
+        -- Total dispatched qty
+        COALESCE((
+          SELECT SUM(d.transfered_qty)
+          FROM customer_orders co
+          LEFT JOIN dispatch_orders d ON d.customer_orders_id = co.id
+          WHERE co.transit_register_id = tr.id
+            AND d.return_status = FALSE
+        ), 0) AS total_dispatched_qty,
+
+        -- Remaining Qty
+        (
+          tr.quantity -
+          COALESCE((
+            SELECT SUM(d.transfered_qty)
+            FROM customer_orders co
+            LEFT JOIN dispatch_orders d ON d.customer_orders_id = co.id
+            WHERE co.transit_register_id = tr.id
+              AND d.return_status = FALSE
+          ), 0)
+        ) AS remaining_qty
+
+      FROM transit_register tr
+      JOIN manufacture_articles ma ON ma.id = tr.manufacture_articles_id
+
+      WHERE tr.manufacture_articles_id = $1
+      ${searchClause}
+
+      ORDER BY ${sortBy} ${sortOrder}
+      ${paginationClause}
+    `;
+
+    const result = await sqlQueryFun(queryStr, values);
+
+    // -----------------------------
+    // 🧮 COUNT FOR PAGINATION
+    // -----------------------------
+    const countValues = [id];
+    let countQuery = `
+      SELECT COUNT(*) AS total
+      FROM transit_register tr
+      WHERE tr.manufacture_articles_id = $1
+    `;
+
+    if (search) {
+      countQuery += ` AND LOWER(tr.production_name) LIKE LOWER($2) `;
+      countValues.push(`%${search}%`);
+    }
+
+    const [countResult] = await sqlQueryFun(countQuery, countValues);
+    const totalRecords = parseInt(countResult.total);
+
+    const totalPages = limit === "all" ? 1 : Math.ceil(totalRecords / limit);
+
+    // -----------------------------
+    // 📤 FINAL RESPONSE
+    // -----------------------------
+    console.log(result)
+    return {
+      status: true,
+      message: "Transit Register history fetched successfully.",
+      data: result,
+      pagination: {
+        total_records: totalRecords,
+        page,
+        limit,
+        total_pages: totalPages,
+      }
+    };
+
+  } catch (error) {
+    return {
+      status: false,
+      message: `Something went wrong. (${error.message})`
+    };
+  }
 };

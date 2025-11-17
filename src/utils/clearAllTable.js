@@ -34,7 +34,7 @@ async function clearAllTables() {
       transit_register,
       unit_master,
       unit_master_items,
-      users
+      users,dispatch_orders,dispatch_orders
   RESTART IDENTITY CASCADE;
 `);
     //  users,
@@ -82,7 +82,9 @@ async function dropAllTables() {
       'transit_register',
       'unit_master',
       'unit_master_items',
-      'users'
+      'users',
+      'customer_orders',
+      'dispatch_orders'
     ];
     //  'users',
     for (const table of tables) {

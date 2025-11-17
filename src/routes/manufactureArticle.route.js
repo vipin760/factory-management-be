@@ -9,5 +9,6 @@ routes.get('/',manufactureArticlesController.fetchmanufactureArticle)
 routes.put('/:id',manufactureArticlesController.updatemanufactureArticle)
 routes.delete('/:id',manufactureArticlesController.deletemanufactureArticle)
 routes.get('/:id',manufactureArticlesController.fetchmanufactureArticleById)
+routes.get('/history/:id',manufactureArticlesController.getAllManufactureArticleHistoryByIdController)
 
 module.exports = routes

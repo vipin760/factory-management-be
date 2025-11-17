@@ -11,7 +11,8 @@ exports.creategrn = catchAsync( async(req ,res ,next)=>{
 exports.getAllgrn = catchAsync( async(req ,res ,next)=>{
     const {status, data, message} = await grnServices.getAllGrnService(req.query);
     if(!status) return next(new ErrorHandler(message,400));
-    return res.status(200).send({status,data,message})
+    const { result, pagination } = data
+    return res.status(200).send({status,data:result,pagination,message})
 })
 
 exports.getSinlgegrn = catchAsync( async(req ,res ,next)=>{

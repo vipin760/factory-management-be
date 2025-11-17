@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const { sqlQueryFun } = require("../database/sql/sqlFunction");
+// Storekeeper, Jailor, Superintendent
 
 exports.authenticate = async(req, res, next) => {
   const token = req.header("Authorization")?.replace("Bearer ", "");

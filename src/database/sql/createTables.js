@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS indent_calculations (
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   order_date TIMESTAMP DEFAULT now(),                               
   expected_delivery DATE,
-  status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'ordered','approved', 'processing', 'shipped', 'received', 'cancelled', 'returned')),
+  status TEXT DEFAULT 'draft' CHECK (status IN ('draft','approved', 'cancelled', 'returned')),
   total_amount NUMERIC DEFAULT 0,
   remarks TEXT,
   created_at TIMESTAMP DEFAULT now(),
@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS ordered_item_history (
     received_by UUID REFERENCES users(id) NOT NULL,
     received_at TIMESTAMP DEFAULT now(),
     gate_pass_number TEXT NOT NULL,
+    status TEXT DEFAULT 'draft' CHECK (status IN ('draft','approved', 'cancelled', 'returned')),
     notes TEXT
   );
 

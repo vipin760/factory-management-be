@@ -45,6 +45,7 @@ exports.fileUploadService1 = async (body, userId, filesObj) => {
         await client.query("COMMIT");
         return { status: true, message: "Files uploaded successfully.", data: uploadedFiles };
     } catch (error) {
+        console.log("<><>error",error)
         await client.query("ROLLBACK");
         return { status: false, message: `Something went wrong (${error.message})` };
     } finally {
@@ -65,7 +66,6 @@ exports.fileUploadService = async (body, userId, filesObj) => {
         // Handle multiple generic files
         if (filesObj.files) {
             for (const file of filesObj.files) {
-                 console.log("<><>file",file)
                 const insertQuery = `
                     INSERT INTO purchase_order_files
                     (purchase_order_id, uploaded_by, file_url, file_type, remarks)

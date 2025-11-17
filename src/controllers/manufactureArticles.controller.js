@@ -31,3 +31,9 @@ exports.fetchmanufactureArticleById = catchAsync(async (req, res, next) => {
     if (!status) return next(new ErrorHandler(message, 400));
     return res.status(200).send({ status,data, message })
 })
+
+exports.getAllManufactureArticleHistoryByIdController = catchAsync(async (req, res, next) => {
+    const { status, data, message, pagination } = await manufactureArticleServices.getAllManufactureArticleHistoryById(req.query,req.params.id);
+    if (!status) return next(new ErrorHandler(message, 400));
+    return res.status(200).send({ status,data,pagination, message })
+})
