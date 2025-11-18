@@ -6,7 +6,7 @@ const { authenticate, authorizeRoles } = require('../middleware/auth');
 routes.use(authenticate)
 routes.post("/",vendorsController.createvendor)
 routes.get("/",vendorsController.fetchVendor)
-routes.put("/:id",authorizeRoles("admin"),vendorsController.updateVendor)
+routes.put("/:id",authorizeRoles("superintendent"),vendorsController.updateVendor)
 routes.delete("/:id",vendorsController.deleteVendor)
 
 module.exports = routes

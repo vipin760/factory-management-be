@@ -45,7 +45,6 @@ exports.createIndentService = async (body, userId) => {
         [raw_material_id]
       );
       const {total_qty,name} = rmRes.rows[0]
-console.log(name, total_qty);
 
       if (!rmRes.rows.length) {
         await client.query("ROLLBACK");

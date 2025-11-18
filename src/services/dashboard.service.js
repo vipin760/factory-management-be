@@ -142,8 +142,7 @@ exports.getDashboardData = async (params = {}) => {
         // 2️⃣ Active Batches (in production)
         const activeBatchesQuery = `
             SELECT COUNT(*)::int AS count
-            FROM batches
-            WHERE status = 'in_progress';
+            FROM manufacture_articles;
         `;
         const { rows: [activeBatches] } = await client.query(activeBatchesQuery);
 
@@ -156,13 +155,19 @@ exports.getDashboardData = async (params = {}) => {
         const { rows: [lowStockItems] } = await client.query(lowStockQuery);
 
         // 4️⃣ Completed Orders this month
+        // const completedOrdersQuery = `
+        //     SELECT COUNT(*)::int AS count
+        //     FROM purchase_orders
+        //     WHERE status = 'completed'
+        //     AND EXTRACT(MONTH FROM updated_at) = EXTRACT(MONTH FROM CURRENT_DATE)
+        //     AND EXTRACT(YEAR FROM updated_at) = EXTRACT(YEAR FROM CURRENT_DATE);
+        // `;
         const completedOrdersQuery = `
-            SELECT COUNT(*)::int AS count
-            FROM purchase_orders
-            WHERE status = 'completed'
-            AND EXTRACT(MONTH FROM updated_at) = EXTRACT(MONTH FROM CURRENT_DATE)
-            AND EXTRACT(YEAR FROM updated_at) = EXTRACT(YEAR FROM CURRENT_DATE);
-        `;
+    SELECT COUNT(*)::int AS completed_orders
+    FROM customer_orders
+    WHERE status = 'COMPLETED';
+`;
+
         const { rows: [completedOrders] } = await client.query(completedOrdersQuery);
 
         // 5️⃣ Recent Activity (last 10)
@@ -202,7 +207,7 @@ exports.getDashboardData = async (params = {}) => {
                     },
                     {
                         title: 'Completed Orders',
-                        value: completedOrders.count,
+                        value: completedOrders.completed_orders,
                         subtitle: 'This month',
                         rate: getCompletedOrdersStats
                     }
@@ -269,7 +274,7 @@ exports.fetchRecentActivity = async (params = {}) => {
         values.push(offset);
         const limitIndex = values.length - 1;
         const offsetIndex = values.length;
-const data1 = await client.query(`SELECT * FROM audit_logs`)
+        const data1 = await client.query(`SELECT * FROM audit_logs`)
         const recentActivityQuery = `
       SELECT
         a.entity_type,

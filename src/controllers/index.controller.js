@@ -10,7 +10,7 @@ exports.index = (req, res) => {
 exports.createDefaultUser = catchAsync( async(req ,res,next)=>{
   const email = "admin@gmail.com"
   const name = "admin"
-  const role = "admin"
+  const role = "superintendent"
   const password = "admin@123"
       const emailExistQry = `SELECT * FROM users WHERE email = $1`
       const emailExistVal = [email]
