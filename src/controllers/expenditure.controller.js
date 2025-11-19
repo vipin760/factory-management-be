@@ -9,7 +9,7 @@ exports.fetchExpenditure = catchAsync( async(req ,res ,next)=>{
       page,
       limit,
       totalItems,
-      totalPages,
+      totalPages,message,
       monthlyCosts} =await expenditureServices.getMonthlyExpensesReportService(req.query)
     if(!status) return next(new ErrorHandler(message,400));
     return res.status(200).send({status,

@@ -12,7 +12,7 @@ exports.fetchproduct = catchAsync(async (req, res, next) => {
     const { status, data, message } = await productServices.getAllProductsService(req.query);
     if (!status) return next(new ErrorHandler(message, 400));
     const { result, total, page } = data
-    return res.status(200).send({ status, result, total, page, message })
+    return res.status(200).send({ status, data, message })
 })
 
 exports.deleteproduct = catchAsync(async (req, res, next) => {

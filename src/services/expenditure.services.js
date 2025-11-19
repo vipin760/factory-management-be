@@ -430,7 +430,7 @@ exports.getMonthlyExpensesReportService2 = async (params = {}) => {
     }
 };
 
-exports.getMonthlyExpensesReportService = async (params = {}) => {
+exports.getMonthlyExpensesReportService1 = async (params = {}) => {
     const client = await pool.connect();
 
     try {
@@ -674,8 +674,277 @@ exports.getMonthlyExpensesReportService = async (params = {}) => {
     }
 };
 
+exports.getMonthlyExpensesReportService = async (params = {}) => {
+    const client = await pool.connect();
+
+    try {
+        const {
+            page = 1,
+            limit = 20,
+            category: rawCategory = null,
+            type: rawType = null,
+            startDate = null,
+            endDate = null,
+            search: rawSearch = null,
+            sortBy = 'date',
+        } = params;
+
+        // ✅ Convert empty strings to NULL to make SQL filtering work
+        const category = rawCategory && rawCategory.trim() !== '' ? rawCategory : null;
+        const type = rawType && rawType.trim() !== '' ? rawType : null;
+        const search = rawSearch && rawSearch.trim() !== '' ? rawSearch : null;
+
+        const offset = (page - 1) * limit;
+        const orderBy = sortBy === 'amount' ? 'amount DESC' : 'date DESC';
+
+        // 🟡 1️⃣ Monthly Summary (for charts)
+        const monthlyQuery = `
+  WITH month_data AS (
+    SELECT
+      id,
+      quantity,
+      TO_CHAR(transit_date, 'YYYY-MM') AS month
+    FROM transit_register
+  )
+
+  SELECT
+    md.month,
+
+    -- Produced qty
+    COALESCE(SUM(md.quantity), 0) AS total_produced_qty,
+
+    -- Total ordered qty
+    COALESCE((
+      SELECT SUM(co.ordered_qty)
+      FROM customer_orders co
+      WHERE co.transit_register_id IN (SELECT id FROM month_data WHERE month = md.month)
+    ), 0) AS total_ordered_qty,
+
+    -- Total dispatched qty
+    COALESCE((
+      SELECT SUM(d.transfered_qty)
+      FROM customer_orders co
+      LEFT JOIN dispatch_orders d ON d.customer_orders_id = co.id
+      WHERE co.transit_register_id IN (SELECT id FROM month_data WHERE month = md.month)
+      AND d.return_status = FALSE
+    ), 0) AS total_dispatched_qty,
+
+    -- Total cost
+    COALESCE((
+      SELECT SUM(co.ordered_qty * co.rate)
+      FROM customer_orders co
+      WHERE co.transit_register_id IN (SELECT id FROM month_data WHERE month = md.month)
+    ), 0) AS total_cost,
+
+    MAX(md.month) AS last_updated
+
+  FROM month_data md
+  GROUP BY md.month
+  ORDER BY md.month ASC;
+`;
 
 
+        const rows = await sqlQueryFun(monthlyQuery);
+
+        // ------------------------------------------
+        // Calculate month-over-month change
+        // ------------------------------------------
+        const formatted = rows.map((row, i, arr) => {
+            const current = {
+                month: row.month,
+                total_produced_qty: Number(row.total_produced_qty),
+                total_ordered_qty: Number(row.total_ordered_qty),
+                total_dispatched_qty: Number(row.total_dispatched_qty),
+                total_cost: Number(row.total_cost),
+                last_updated: row.last_updated,
+            };
+
+            if (i === 0) {
+                return {
+                    ...current,
+                    change_from_last_month: {
+                        total_produced_qty: "0",
+                        total_ordered_qty: "0",
+                        total_dispatched_qty: "0",
+                        total_cost: "0"
+                    }
+                };
+            }
+
+            const prev = arr[i - 1];
+
+            return {
+                ...current,
+                change_from_last_month: {
+                    total_produced_qty: (current.total_produced_qty - prev.total_produced_qty).toString(),
+                    total_ordered_qty: (current.total_ordered_qty - prev.total_ordered_qty).toString(),
+                    total_dispatched_qty: (current.total_dispatched_qty - prev.total_dispatched_qty).toString(),
+                    total_cost: (current.total_cost - prev.total_cost).toString(),
+                }
+            };
+        });
+
+        // 🟡 2️⃣ Summary Total Values
+        const summaryQuery = `
+SELECT
+  COALESCE(SUM(ii.rate * ii.weight), 0) AS total_material_cost,
+  0 AS total_production_cost, -- no such field exists
+  COALESCE(SUM(ic.final_amount), 0) AS total_operations_cost,
+  (
+    COALESCE(SUM(ii.rate * ii.weight), 0) +
+    COALESCE(SUM(ic.final_amount), 0)
+  ) AS total_expenses
+FROM indents i
+LEFT JOIN indent_items ii ON ii.indent_id = i.id
+LEFT JOIN indent_calculations ic ON ic.indent_id = i.id
+WHERE ($1::date IS NULL OR i.indent_date >= $1)
+  AND ($2::date IS NULL OR i.indent_date <= $2);
+`;
+
+        const summaryResult = await client.query(summaryQuery, [startDate, endDate]);
+        const summary = summaryResult.rows[0];
+
+        // 🟡 3️⃣ Detailed Data (with filters, pagination & search)
+        const detailedQuery = `
+      SELECT * FROM (
+        -- Material Cost
+        SELECT 
+          rm.name || ' Purchase' AS title,
+          (poi.qty * poi.rate)::numeric AS amount,
+          'cost' AS type,
+          'material' AS category,
+          po.purchase_order_id::text AS ref_no,
+          po.order_date AS date
+        FROM purchase_order_items poi
+        JOIN purchase_orders po ON po.id = poi.purchase_order_id
+        JOIN raw_materials rm ON rm.id = poi.raw_material_id
+        WHERE ($3::text IS NULL OR 'material' = $3)
+          AND ($4::text IS NULL OR 'cost' = $4)
+          AND ($1::date IS NULL OR po.order_date >= $1)
+          AND ($2::date IS NULL OR po.order_date <= $2)
+          AND ($7::text IS NULL OR rm.name ILIKE '%' || $7 || '%' OR po.purchase_order_id::text ILIKE '%' || $7 || '%')
+
+        UNION ALL
+
+        -- Production Cost
+        SELECT 
+          'Production Batch - ' || p.product_name AS title,
+          (COALESCE(SUM(brmc.qty_consumed * brmc.rate),0) + COALESCE(SUM(be.total_cost),0))::numeric AS amount,
+          'cost' AS type,
+          'production' AS category,
+          pb.batch_id::text AS ref_no,
+          pb.created_at AS date
+        FROM production_batches pb
+        JOIN products p ON p.id = pb.product_id
+        LEFT JOIN batch_raw_material_consumptions brmc ON pb.id = brmc.production_batch_id
+        LEFT JOIN batch_expenses be ON pb.id = be.production_batch_id
+        WHERE ($3::text IS NULL OR 'production' = $3)
+          AND ($4::text IS NULL OR 'cost' = $4)
+          AND ($1::date IS NULL OR pb.created_at >= $1)
+          AND ($2::date IS NULL OR pb.created_at <= $2)
+          AND ($7::text IS NULL OR p.product_name ILIKE '%' || $7 || '%' OR pb.batch_id::text ILIKE '%' || $7 || '%')
+        GROUP BY pb.id, p.product_name
+
+        UNION ALL
+
+        -- Operation / Utility Expenses
+        SELECT
+          'Factory Utilities' AS title,
+          SUM(total_cost)::numeric AS amount,
+          'expense' AS type,
+          'operation' AS category,
+          NULL::text AS ref_no,
+          created_at AS date
+        FROM batch_expenses
+        WHERE expense_category='utility'
+          AND ($3::text IS NULL OR 'operation' = $3)
+          AND ($4::text IS NULL OR 'expense' = $4)
+          AND ($1::date IS NULL OR created_at >= $1)
+          AND ($2::date IS NULL OR created_at <= $2)
+          AND ($7::text IS NULL OR 'Factory Utilities' ILIKE '%' || $7 || '%')
+        GROUP BY created_at
+      ) AS combined
+      ORDER BY ${orderBy}
+      LIMIT $5::INTEGER OFFSET $6::INTEGER;
+    `;
+
+        const detailedResult = await client.query(detailedQuery, [
+            startDate,
+            endDate,
+            category,
+            type,
+            limit,
+            offset,
+            search,
+        ]);
+
+        // 🟡 4️⃣ Count Query
+        const countQuery = `
+      SELECT COUNT(*) AS total_count FROM (
+        SELECT po.purchase_order_id::text AS id
+        FROM purchase_order_items poi
+        JOIN purchase_orders po ON po.id = poi.purchase_order_id
+        JOIN raw_materials rm ON rm.id = poi.raw_material_id
+        WHERE ($1::text IS NULL OR 'material' = $1)
+          AND ($2::text IS NULL OR 'cost' = $2)
+          AND ($3::date IS NULL OR po.order_date >= $3)
+          AND ($4::date IS NULL OR po.order_date <= $4)
+          AND ($5::text IS NULL OR rm.name ILIKE '%' || $5 || '%' OR po.purchase_order_id::text ILIKE '%' || $5 || '%')
+
+        UNION ALL
+
+        SELECT pb.batch_id::text AS id
+        FROM production_batches pb
+        JOIN products p ON p.id = pb.product_id
+        LEFT JOIN batch_raw_material_consumptions brmc ON pb.id = brmc.production_batch_id
+        LEFT JOIN batch_expenses be ON pb.id = be.production_batch_id
+        WHERE ($1::text IS NULL OR 'production' = $1)
+          AND ($2::text IS NULL OR 'cost' = $2)
+          AND ($3::date IS NULL OR pb.created_at >= $3)
+          AND ($4::date IS NULL OR pb.created_at <= $4)
+          AND ($5::text IS NULL OR p.product_name ILIKE '%' || $5 || '%' OR pb.batch_id::text ILIKE '%' || $5 || '%')
+
+        UNION ALL
+
+        SELECT created_at::text AS id
+        FROM batch_expenses
+        WHERE expense_category='utility'
+          AND ($1::text IS NULL OR 'operation' = $1)
+          AND ($2::text IS NULL OR 'expense' = $2)
+          AND ($3::date IS NULL OR created_at >= $3)
+          AND ($4::date IS NULL OR created_at <= $4)
+          AND ($5::text IS NULL OR 'Factory Utilities' ILIKE '%' || $5 || '%')
+      ) AS combined;
+    `;
+
+        const countResult = await client.query(countQuery, [
+            category,
+            type,
+            startDate,
+            endDate,
+            search,
+        ]);
+
+        const totalItems = Number(countResult.rows[0].total_count || 0);
+        const totalPages = Math.ceil(totalItems / limit);
+
+        return {
+            status: true,
+            summary,
+            data: detailedResult.rows,
+            page,
+            limit,
+            totalItems,
+            totalPages,
+            monthlyCosts: formatted,
+        };
+    } catch (err) {
+        console.error('❌ getMonthlyExpensesReportService Error:', err);
+        return { status: false, message: err.message };
+    } finally {
+        client.release();
+    }
+};
 
 
 

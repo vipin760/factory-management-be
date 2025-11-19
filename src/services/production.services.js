@@ -163,7 +163,7 @@ exports.createProductionService = async (body, userId) => {
   }
 };
 
-exports.getAllProductionService = async (query) => {
+exports.getAllProductionService1 = async (query) => {
   try {
     const {
       search,
@@ -310,6 +310,208 @@ exports.getAllProductionService = async (query) => {
       },
       message: "Production batches fetched successfully."
     };
+  } catch (error) {
+    return {
+      status: false,
+      data: "",
+      message: `Something went wrong. (${error.message})`
+    };
+  }
+};
+
+exports.getAllProductionService = async (queryParams) => {
+  try {
+    let {
+         page = 1,
+         limit = 10,
+         search = "",
+         sortBy = "tr.created_at",
+         order = "desc",
+         status,
+         start_date,
+         end_date
+       } = queryParams;
+   
+       page = parseInt(page);
+       limit = limit === "all" ? "all" : parseInt(limit);
+       order = order.toUpperCase() === "ASC" ? "ASC" : "DESC";
+   
+       // -----------------------------------
+       // 🔍 FILTERS
+       // -----------------------------------
+       const filters = [];
+       const values = [];
+       let idx = 1;
+   
+       // 🔎 Search filter
+       if (search) {
+         filters.push(`(
+           tr.production_name ILIKE $${idx} OR
+           ma.article_name ILIKE $${idx} OR
+           i.indent_no ILIKE $${idx}
+         )`);
+         values.push(`%${search}%`);
+         idx++;
+       }
+   
+       // 🔘 Status filter
+       if (status) {
+         filters.push(`tr.status = $${idx}`);
+         values.push(status);
+         idx++;
+       }
+   
+       // 📅 Date filters
+       if (start_date) {
+         filters.push(`tr.transit_date >= $${idx}`);
+         values.push(start_date);
+         idx++;
+       }
+   
+       if (end_date) {
+         filters.push(`tr.transit_date <= $${idx}`);
+         values.push(end_date);
+         idx++;
+       }
+   
+       const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+   
+       // -------------------------------------
+       // 📌 MAIN BASE QUERY
+       // -------------------------------------
+       const baseQuery = `
+         SELECT 
+           tr.id AS transit_id,
+           tr.production_name,
+           tr.transit_date,
+           tr.quantity AS total_produced_qty,
+           tr.unit,
+           tr.indent_id,
+   
+           -- Total units
+           (
+             SELECT COUNT(*)
+             FROM unit_master_items umi
+             WHERE umi.unit_master_id = i.unit_master_id
+           ) AS total_units,
+   
+           -- Completed units
+           (
+             SELECT COUNT(*)
+             FROM customer_orders co
+             WHERE co.transit_register_id = tr.id
+               AND co.status = 'COMPLETED'
+           ) AS completed_units,
+   
+           -- Active units
+           (
+             SELECT COUNT(*)
+             FROM customer_orders co
+             WHERE co.transit_register_id = tr.id
+               AND co.status != 'COMPLETED'
+           ) AS active_units,
+   
+           -- Total ordered qty
+           (
+             SELECT COALESCE(SUM(co.ordered_qty), 0)
+             FROM customer_orders co
+             WHERE co.transit_register_id = tr.id
+           ) AS total_ordered_qty,
+   
+           -- Total dispatched qty
+           (
+             SELECT COALESCE(SUM(d.transfered_qty), 0)
+             FROM customer_orders co
+             LEFT JOIN dispatch_orders d ON d.customer_orders_id = co.id
+             WHERE co.transit_register_id = tr.id
+               AND d.return_status = FALSE
+           ) AS total_dispatched_qty,
+   
+           -- Remaining qty
+           (
+             tr.quantity -
+             COALESCE((
+               SELECT SUM(d.transfered_qty)
+               FROM customer_orders co
+               LEFT JOIN dispatch_orders d ON d.customer_orders_id = co.id
+               WHERE co.transit_register_id = tr.id
+                 AND d.return_status = FALSE
+             ), 0)
+           ) AS remaining_qty,
+   
+           -- Total cost
+           (
+             SELECT COALESCE(SUM(co.ordered_qty * co.rate), 0)
+             FROM customer_orders co
+             WHERE co.transit_register_id = tr.id
+           ) AS total_cost,
+   
+           -- Article details
+           ma.article_name,
+           ma.remarks AS article_remarks,
+   
+           -- Indent info
+           i.indent_no,
+           i.quantity AS indent_quantity
+   
+         FROM transit_register tr
+         LEFT JOIN manufacture_articles ma ON ma.id = tr.manufacture_articles_id
+         LEFT JOIN indents i ON i.id = tr.indent_id
+         ${whereClause}
+       `;
+   
+       // -----------------------------------
+       // 🟢 LIMIT = ALL → No pagination
+       // -----------------------------------
+       if (limit === "all") {
+         const finalQuery = `${baseQuery} ORDER BY ${sortBy} ${order}`;
+         const rows = await sqlQueryFun(finalQuery, values);
+   
+         return {
+           status: true,
+           data: { result: rows, total: rows.length },
+           message: "All records fetched successfully"
+         };
+       }
+   
+       // -----------------------------------
+       // 🟡 PAGINATION
+       // -----------------------------------
+       const offset = (page - 1) * limit;
+   
+       values.push(limit, offset);
+   
+       const paginatedQuery = `
+         ${baseQuery}
+         ORDER BY ${sortBy} ${order}
+         LIMIT $${idx} OFFSET $${idx + 1}
+       `;
+   
+       const result = await sqlQueryFun(paginatedQuery, values);
+   
+       // COUNT QUERY
+       const countQuery = `
+         SELECT COUNT(*) AS total
+         FROM transit_register tr
+         LEFT JOIN manufacture_articles ma ON ma.id = tr.manufacture_articles_id
+         LEFT JOIN indents i ON i.id = tr.indent_id
+         ${whereClause}
+       `;
+   
+       const countValues = values.slice(0, idx - 1);
+       const countResult = await sqlQueryFun(countQuery, countValues);
+       const total = parseInt(countResult[0]?.total || 0);
+   console.log("<><>result",result)
+       return {
+         status: true,
+         data: {
+           result,
+           total,
+           page,
+           totalPages: Math.ceil(total / limit)
+         },
+         message: "Transit records fetched successfully"
+       };
   } catch (error) {
     return {
       status: false,
