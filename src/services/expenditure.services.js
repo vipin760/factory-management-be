@@ -1429,7 +1429,7 @@ exports.reportAndAnalytics2 = async ({ filter = 'current_month', startDate = nul
     }
 };
 
-exports.reportAndAnalytics = async ({ filter = 'current_month', startDate = null, endDate = null }) => {
+exports.reportAndAnalytics1 = async ({ filter = 'current_month', startDate = null, endDate = null }) => {
     const client = await pool.connect();
     try {
         // 🧭 1️⃣ Define time filters dynamically
@@ -1670,6 +1670,140 @@ WHERE b.status != 'rejected'`)
         client.release();
     }
 };
+
+exports.reportAndAnalytics = async ({ filter = 'current_month', startDate = null, endDate = null }) => {
+    const client = await pool.connect();
+    try {
+        let start, end, prevStart, prevEnd;
+
+        const getDateRange = (filter) => {
+            switch (filter) {
+                case 'last_month':
+                    return [
+                        `date_trunc('month', now() - interval '1 month')`,
+                        `date_trunc('month', now()) - interval '1 day'`
+                    ];
+                case 'last_3_months':
+                    return [
+                        `date_trunc('month', now() - interval '3 month')`,
+                        `date_trunc('month', now()) + interval '1 month' - interval '1 day'`
+                    ];
+                case 'current_year':
+                    return [
+                        `date_trunc('year', now())`,
+                        `date_trunc('year', now()) + interval '1 year' - interval '1 day'`
+                    ];
+                default:
+                    return [
+                        `date_trunc('month', now())`,
+                        `date_trunc('month', now()) + interval '1 month' - interval '1 day'`
+                    ];
+            }
+        };
+
+        if (filter === 'custom' && startDate && endDate) {
+            start = `'${startDate}'`;
+            end = `'${endDate}'`;
+
+            const prevStartDate = new Date(new Date(startDate).getTime() - (new Date(endDate) - new Date(startDate)) - 24 * 60 * 60 * 1000);
+            const prevEndDate = new Date(new Date(startDate).getTime() - 24 * 60 * 60 * 1000);
+            prevStart = `'${prevStartDate.toISOString().split('T')[0]}'`;
+            prevEnd = `'${prevEndDate.toISOString().split('T')[0]}'`;
+        } else {
+            [start, end] = getDateRange(filter);
+
+            prevStart = `(${start} - (${end} - ${start}) - interval '1 day')`;
+            prevEnd = `(${start} - interval '1 day')`;
+        }
+
+        // FIXED
+        const dateConditionPO = `order_date BETWEEN ${start} AND ${end}`;
+
+        // FIXED KPI QUERY
+        const buildKPIQuery = (s, e, poCond) => `
+    WITH planned AS (
+        SELECT COALESCE(SUM(quantity),0) AS planned_qty
+        FROM indents
+        WHERE indent_date BETWEEN ${s} AND ${e}
+    ),
+    produced AS (
+        SELECT COALESCE(SUM(quantity),0) AS produced_qty
+        FROM transit_register
+        WHERE transit_date BETWEEN ${s} AND ${e}
+    ),
+    total_exp AS (
+        SELECT COALESCE(SUM(total_amount),0) AS total_cost
+        FROM purchase_orders
+        WHERE ${poCond}
+    ),
+    active_vendors AS (
+        SELECT COUNT(DISTINCT vendor_id) AS vendor_count
+        FROM purchase_orders
+        WHERE ${poCond}
+    )
+    SELECT
+        planned.planned_qty AS planned_production,
+        produced.produced_qty AS total_production,
+        CASE WHEN planned.planned_qty = 0 THEN 0 ELSE (produced.produced_qty / planned.planned_qty) * 100 END AS industrial_efficiency,
+        COALESCE(total_exp.total_cost,0) AS total_expenditures,
+        active_vendors.vendor_count AS active_vendors
+    FROM planned, produced, total_exp, active_vendors;
+`;
+
+        const currentKPI = await client.query(buildKPIQuery(start, end, dateConditionPO));
+        const prevKPI = await client.query(buildKPIQuery(prevStart, prevEnd, dateConditionPO));
+
+        const current = currentKPI.rows[0] || {};
+        const prev = prevKPI.rows[0] || {};
+
+        const calcPercent = (curr, prev) =>
+            (!prev || prev === 0 ? 0 : Number((((curr - prev) / prev) * 100).toFixed(2)));
+
+        const kpi_percentage = {
+            planned_production: calcPercent(Number(current.planned_production), Number(prev.planned_production)),
+            total_production: calcPercent(Number(current.total_production), Number(prev.total_production)),
+            industrial_efficiency: calcPercent(Number(current.industrial_efficiency), Number(prev.industrial_efficiency)),
+            total_expenditures: calcPercent(Number(current.total_expenditures), Number(prev.total_expenditures)),
+            active_vendors: calcPercent(Number(current.active_vendors), Number(prev.active_vendors))
+        };
+
+        // Production Value by Product
+        const productValueQuery = `
+            SELECT ma.article_name AS product_name, COALESCE(SUM(tr.quantity),0) AS total_production_value
+            FROM manufacture_articles ma
+            LEFT JOIN transit_register tr ON ma.id = tr.manufacture_articles_id
+            WHERE tr.transit_date BETWEEN ${start} AND ${end}
+            GROUP BY ma.article_name
+            ORDER BY total_production_value DESC;
+        `;
+        const productValueResult = await client.query(productValueQuery);
+
+        // UPDATED – Only procurement remains
+        const expenditureBreakdownQuery = `
+            SELECT 'Procurement' AS category, COALESCE(SUM(total_amount),0) AS total_amount
+            FROM purchase_orders
+            WHERE ${dateConditionPO};
+        `;
+        const expenditureResult = await client.query(expenditureBreakdownQuery);
+
+        return {
+            status: true,
+            message: `Report and analytics fetched successfully for filter: ${filter}`,
+            data: {
+                kpis: { ...current, kpi_percentage },
+                productValues: productValueResult.rows,
+                expenditureBreakdown: expenditureResult.rows
+            }
+        };
+
+    } catch (error) {
+        console.error('Error in reportAndAnalytics:', error);
+        return { status: false, message: `Something went wrong (${error.message})` };
+    } finally {
+        client.release();
+    }
+};
+
 
 
 
